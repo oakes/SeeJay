@@ -7,7 +7,6 @@
 #include "util.h"
 
 #define PRIVATE_KEY "private.pem"
-#define PUBLIC_KEY "public.pem"
 
 /*
  * Callback function that is called when a packet is received.
@@ -31,9 +30,7 @@ static int start_node(struct event_base* base, int node_num)
 		return -1;
 	}
 	else if (!file_exists(PRIVATE_KEY)) {
-		if (create_key(&key) < 0 ||
-			write_key(key, PRIVATE_KEY, PUBLIC_KEY) < 0)
-		{
+		if (create_key(&key) < 0 || write_key(key, PRIVATE_KEY) < 0) {
 			return -1;
 		}
 	}

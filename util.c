@@ -7,7 +7,7 @@
  * Reads the file into memory and returns a pointer.
  */
 
-int read_file(char *name, char *buffer)
+int read_file(char *name, char **content)
 {
 	/* open the file */
 
@@ -24,12 +24,14 @@ int read_file(char *name, char *buffer)
 
 	/* read and return the contents */
 
-	if (!(buffer = (char *)malloc(len+1))) {
+	char *buffer;
+	if (!(buffer = (char *)calloc(len+1, 1))) {
 		fclose(file);
 		return -1;
 	}
 	fread(buffer, len, 1, file);
 	fclose(file);
+	*content = buffer;
 
 	return 0;
 }

@@ -6,21 +6,72 @@
 #include <openssl/rand.h>
 
 #include "crypto.h"
+#include "util.h"
 
-int create_keys(char *priv_name, char *pub_name) {
-	/* create private key */
+/*
+ * Generates an RSA-2048 private key.
+ */
 
+int create_key(void ** key) {
 	RSA *rsa;
 	BIGNUM num;
 	bzero(&num, sizeof(num));
-	EVP_PKEY pkey;
-	bzero(&pkey, sizeof(pkey));
-	if (BN_set_word(&num, 0x1001) == 0 ||
+
+	if (BN_set_word(&num, 65537) == 0 ||
 		(rsa = RSA_new()) == NULL ||
-		RSA_generate_key_ex(rsa, 2048, &num, NULL) == 0 ||
-		EVP_PKEY_assign_RSA(&pkey, rsa) == 0)
+		RSA_generate_key_ex(rsa, 2048, &num, NULL) == 0)
 	{
 		printf("failed to generate RSA key\n");
+		return -1;
+	}
+	*key = rsa;
+
+	return 0;
+}
+
+/*
+ * Reads the private key from the disk.
+ */
+
+int read_key(void **key, char *priv_name)
+{
+	EVP_PKEY *pkey;
+	char *buffer;
+	BIO *in;
+
+	/* read the key into a pkey */
+
+	if (read_file(priv_name, &buffer) < 0 ||
+		(in = BIO_new_mem_buf(buffer, -1)) == NULL ||
+		(pkey = PEM_read_bio_PrivateKey(in, NULL, NULL, NULL)) == NULL)
+	{
+		printf("failed to read the key\n");
+		return -1;
+	}
+
+	/* interpret it based on the algorithm */
+
+	switch (EVP_PKEY_type(pkey->type)) {
+	case EVP_PKEY_RSA:
+		*key = EVP_PKEY_get1_RSA(pkey);
+		break;
+	}
+
+	return 0;
+}
+
+/*
+ * Writes the private key and certificate to the disk.
+ */
+
+int write_key(void *key, char *priv_name, char *cert_name)
+{
+	/* turn key into pkey */
+
+	EVP_PKEY pkey;
+	bzero(&pkey, sizeof(pkey));
+	if (EVP_PKEY_assign_RSA(&pkey, (RSA *)key) == 0) {
+		printf("failed to parse the key\n");
 		return -1;
 	}
 
@@ -38,6 +89,7 @@ int create_keys(char *priv_name, char *pub_name) {
 	/* create X509 cert */
 
 	X509 *x509 = NULL;
+	BIGNUM num;
 	bzero(&num, sizeof(num));
 	EVP_PKEY *tempkey = NULL;
 	if ((x509 = X509_new()) == NULL ||
@@ -58,20 +110,19 @@ int create_keys(char *priv_name, char *pub_name) {
 	/* write private key */
 
 	BIO *out = BIO_new(BIO_s_file());
-	char *password = NULL;
+	const EVP_CIPHER *enc = NULL; /* EVP_aes_256_cbc(); */
 	if (BIO_write_filename(out, priv_name) <= 0 ||
-		PEM_write_bio_PrivateKey(out, &pkey, EVP_aes_256_cbc(),
-		NULL, 0, NULL, password) == 0)
+		PEM_write_bio_PrivateKey(out, &pkey, enc, NULL, 0, NULL, NULL) == 0)
 	{
 		printf("failed to write private key\n");
 		return -1;
 	}
 	BIO_free_all(out);
 
-	/* write public key */
+	/* write certificate */
 
 	out = BIO_new(BIO_s_file());
-	if (BIO_write_filename(out, pub_name) <= 0 ||
+	if (BIO_write_filename(out, cert_name) <= 0 ||
 		PEM_write_bio_X509(out, x509) == 0)
 	{
 		printf("failed to write public key\n");
@@ -84,7 +135,6 @@ int create_keys(char *priv_name, char *pub_name) {
 	EVP_PKEY_free(tempkey);
 	X509_free(x509);
 	X509_REQ_free(req);
-	RSA_free(rsa);
 
 	return 0;
 }

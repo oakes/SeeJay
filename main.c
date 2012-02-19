@@ -6,8 +6,8 @@
 #include "crypto.h"
 #include "util.h"
 
-#define PRIVATE_NAME "private.pem"
-#define PUBLIC_NAME "public.pem"
+#define PRIVATE_KEY "private.pem"
+#define PUBLIC_KEY "public.pem"
 
 /*
  * Callback function that is called when a packet is received.
@@ -19,25 +19,25 @@ static void received_data(evutil_socket_t sock, short eventType, void* param)
 }
 
 /*
- * Gets the crypto keys and initializes the UDP socket.
+ * Gets the crypto key and initializes the UDP socket.
  */
 
-static int start_node(struct event_base* base, int nodeNum)
+static int start_node(struct event_base* base, int node_num)
 {
-	/* load the crypto keys */
+	/* create or load the key */
 
-	if (!file_exists(PRIVATE_NAME) ||
-		!file_exists(PUBLIC_NAME))
-	{
-		if (create_keys(PRIVATE_NAME, PUBLIC_NAME) < 0) {
-			return 1;
+	void *key = NULL;
+	if (node_num > 1 && create_key(&key) < 0) {
+		return -1;
+	}
+	else if (!file_exists(PRIVATE_KEY)) {
+		if (create_key(&key) < 0 ||
+			write_key(key, PRIVATE_KEY, PUBLIC_KEY) < 0)
+		{
+			return -1;
 		}
 	}
-	char *priv_str, *pub_str;
-	if (read_file(PRIVATE_NAME, priv_str) < 0 ||
-		read_file(PUBLIC_NAME, pub_str) < 0)
-	{
-		printf("failed to read keys\n");
+	else if (read_key(&key, PRIVATE_KEY) < 0) {
 		return -1;
 	}
 

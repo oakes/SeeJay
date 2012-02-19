@@ -75,7 +75,7 @@ static int start_node(struct event_base* base, int node_num)
 
 	getsockname(sock, (struct sockaddr*)&addr, &len);
 	unsigned short port = ntohs(((struct sockaddr_in*)&addr)->sin_port);
-	printf("Using UDP port %d\n", port);
+	printf("Using UDP port %hu\n", port);
 
 	/* add it to the event loop */
 
@@ -90,8 +90,8 @@ static int start_node(struct event_base* base, int node_num)
 	/* write the config file if necessary */
 
 	if (node_num == 1 && file_exists(CONFIG_FILE) < 0) {
-		FILE *file = fopen(CONFIG_FILE, "a");
-		if (fprintf(file, "# The main server for all external traffic\n") < 0 ||
+		FILE *file = fopen(CONFIG_FILE, "w");
+		if (fprintf(file, "# Main server for all external traffic\n") < 0 ||
 			fprintf(file, "udp-server\t\t\t%s:%hu\n\n", addr_str, port) < 0 ||
 			fprintf(file, "# Local server for SOCKS-enabled programs\n") < 0 ||
 			fprintf(file, "socks-server\t\t%s:9050\n", addr_str) < 0)
@@ -101,6 +101,7 @@ static int start_node(struct event_base* base, int node_num)
 			return -1;
 		}
 		fclose(file);
+		printf("Wrote config to %s\n", CONFIG_FILE);
 	}
 
 	return sock;
@@ -117,16 +118,18 @@ int main(int argc, char** argv)
 	int count = 1;
 	while (argc > 0) {
 		argc--;
-		if (!strcmp(argv[argc], "--test"))
+		if (!strcmp(argv[argc], "--test")) {
 			count = 10;
+		}
 	}
 
 	/* start the node(s) and enter the event loop */
 
 	struct event_base *base = event_base_new();
 	for (; count > 0; count--) {
-		if (start_node(base, count) < 0)
+		if (start_node(base, count) < 0) {
 			return 1;
+		}
 	}
 	event_base_dispatch(base);
 }

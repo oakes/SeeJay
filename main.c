@@ -60,7 +60,8 @@ static int start_node(struct event_base* base, int node_num)
 	/* announce the port it is running on */
 
 	getsockname(sock, (struct sockaddr*)&addr, &len);
-	printf("Using port %d...\n", ntohs(((struct sockaddr_in*)&addr)->sin_port));
+	unsigned short port = ntohs(((struct sockaddr_in*)&addr)->sin_port);
+	printf("Using UDP port %d\n", port);
 
 	/* add it to the event loop */
 

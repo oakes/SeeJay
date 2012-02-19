@@ -21,7 +21,7 @@ int create_key(void ** key) {
 		(rsa = RSA_new()) == NULL ||
 		RSA_generate_key_ex(rsa, 2048, &num, NULL) == 0)
 	{
-		printf("failed to generate RSA key\n");
+		printf("Failed to generate key\n");
 		return -1;
 	}
 	*key = rsa;
@@ -36,16 +36,15 @@ int create_key(void ** key) {
 int read_key(void **key, char *name)
 {
 	EVP_PKEY *pkey;
-	char *buffer;
-	BIO *in;
+	FILE *file;
 
 	/* read the key into a pkey */
 
-	if (read_file(name, &buffer) < 0 ||
-		(in = BIO_new_mem_buf(buffer, -1)) == NULL ||
-		(pkey = PEM_read_bio_PrivateKey(in, NULL, NULL, NULL)) == NULL)
+	if ((file = fopen(name, "r")) == NULL ||
+		(pkey = PEM_read_PrivateKey(file, NULL, NULL, NULL)) == NULL)
 	{
-		printf("failed to read the key\n");
+		printf("Failed to read the key\n");
+		fclose(file);
 		return -1;
 	}
 
@@ -57,6 +56,7 @@ int read_key(void **key, char *name)
 		break;
 	}
 
+	fclose(file);
 	return 0;
 }
 
@@ -71,7 +71,7 @@ int write_key(void *key, char *name)
 	EVP_PKEY pkey;
 	bzero(&pkey, sizeof(pkey));
 	if (EVP_PKEY_assign_RSA(&pkey, (RSA *)key) == 0) {
-		printf("failed to parse the key\n");
+		printf("Failed to parse the key\n");
 		return -1;
 	}
 
@@ -82,10 +82,12 @@ int write_key(void *key, char *name)
 	if (BIO_write_filename(out, name) <= 0 ||
 		PEM_write_bio_PrivateKey(out, &pkey, enc, NULL, 0, NULL, NULL) == 0)
 	{
-		printf("failed to write private key\n");
+		printf("Failed to write private key\n");
 		return -1;
 	}
 	BIO_free_all(out);
+
+	printf("Wrote private key to %s\n", name);
 
 	return 0;
 }

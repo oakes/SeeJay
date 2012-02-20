@@ -37,8 +37,9 @@ int read_config(char *name, char *key, char *value)
 	while (fgets(buffer, sizeof(buffer), file) != NULL) {
 		temp = strtok(buffer, delims);
 		if (temp != NULL && strcmp(temp, key) == 0) {
-			temp = strtok(NULL, delims);
-			strcpy(value, temp);
+			if ((temp = strtok(NULL, delims)) != NULL) {
+				strcpy(value, temp);
+			}
 			break;
 		}
 	}

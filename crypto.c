@@ -87,7 +87,5 @@ int write_key(void *key, char *name)
 	}
 	BIO_free_all(out);
 
-	printf("Wrote private key to %s\n", name);
-
 	return 0;
 }

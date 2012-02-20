@@ -43,7 +43,7 @@ static int start_node(struct event_base* base, int node_num)
 
 	char addr_str[20];
 	if (node_num == 1 && file_exists(CONFIG_FILE) == 0) {
-		if (read_config(CONFIG_FILE, "udp-server", addr_str) < 0) {
+		if (read_config(CONFIG_FILE, "udpsrv", addr_str) < 0) {
 			printf("Failed to read config\n");
 			return -1;
 		}
@@ -91,17 +91,18 @@ static int start_node(struct event_base* base, int node_num)
 
 	if (node_num == 1 && file_exists(CONFIG_FILE) < 0) {
 		FILE *file = fopen(CONFIG_FILE, "w");
-		if (fprintf(file, "# Main server for all external traffic\n") < 0 ||
-			fprintf(file, "udp-server\t\t\t%s:%hu\n\n", addr_str, port) < 0 ||
-			fprintf(file, "# Local server for SOCKS-enabled programs\n") < 0 ||
-			fprintf(file, "socks-server\t\t%s:9050\n", addr_str) < 0)
+		if (fprintf(file, "# Forward this UDP port!\n") < 0 ||
+			fprintf(file, "udpsrv\t\t\t%s:%hu\n\n", addr_str, port) < 0 ||
+			fprintf(file, "# Only used locally by SOCKS-enabled apps\n") < 0 ||
+			fprintf(file, "socsrv\t\t\t%s:9050\n\n", addr_str) < 0 ||
+			fprintf(file, "# Put your IP here to accept connections\n") < 0 ||
+			fprintf(file, "ext-ip\t\t\t?\n\n") < 0)
 		{
 			printf("Failed to write config\n");
 			fclose(file);
 			return -1;
 		}
 		fclose(file);
-		printf("Wrote config to %s\n", CONFIG_FILE);
 	}
 
 	return sock;

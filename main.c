@@ -7,6 +7,7 @@
 #include "util.h"
 
 #define PRIVATE_FILE "private.pem"
+#define PUBLIC_FILE "public.pem"
 #define CONFIG_FILE  "seejay.conf"
 
 /*
@@ -31,7 +32,7 @@ static int start_node(struct event_base* base, int node_num)
 		if (create_key(&key) < 0) {
 			return -1;
 		}
-		if (node_num == 1 && write_key(key, PRIVATE_FILE) < 0) {
+		if (node_num == 1 && write_key(key, PRIVATE_FILE, PUBLIC_FILE) < 0) {
 			return -1;
 		}
 	}

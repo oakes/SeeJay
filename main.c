@@ -6,8 +6,8 @@
 #include "crypto.h"
 #include "util.h"
 
-#define PRIVATE_FILE "private.pem"
-#define PUBLIC_FILE "public.pem"
+#define PRIV_FILE "private.pem"
+#define PUB_FILE "public.pem"
 #define CONFIG_FILE  "seejay.conf"
 
 /*
@@ -16,7 +16,10 @@
 
 static void received_data(evutil_socket_t sock, short eventType, void* param)
 {
-	
+	/* this is the listening socket */
+	if (param == NULL) {
+		
+	}
 }
 
 /*
@@ -26,25 +29,31 @@ static void received_data(evutil_socket_t sock, short eventType, void* param)
 static int start_node(struct event_base* base, int node_num)
 {
 	/* create or load the key */
-
-	void *key = NULL;
-	if (node_num > 1 || file_exists(PRIVATE_FILE) < 0) {
-		if (create_key(&key) < 0) {
+	void *priv = NULL, *pub = NULL;
+	if (node_num > 1 || !file_exists(PRIV_FILE)) {
+		if (!create_private_key(&priv) ||
+			!create_public_key(priv, &pub))
+		{
 			return -1;
 		}
-		if (node_num == 1 && write_key(key, PRIVATE_FILE, PUBLIC_FILE) < 0) {
-			return -1;
+		if (node_num == 1) {
+			if (!write_private_key(priv, PRIV_FILE) ||
+				!write_public_key(pub, PUB_FILE))
+			{
+				return -1;
+			}
 		}
 	}
-	else if (read_key(&key, PRIVATE_FILE) < 0) {
+	else if (!read_private_key(&priv, PRIV_FILE) ||
+		!read_public_key(&pub, PUB_FILE))
+	{
 		return -1;
 	}
 
 	/* read the config file if necessary */
-
 	char addr_str[20];
-	if (node_num == 1 && file_exists(CONFIG_FILE) == 0) {
-		if (read_config(CONFIG_FILE, "udpsrv", addr_str) < 0) {
+	if (node_num == 1 && file_exists(CONFIG_FILE)) {
+		if (!read_config(CONFIG_FILE, "udpsrv", addr_str)) {
 			printf("Failed to read config\n");
 			return -1;
 		}
@@ -53,8 +62,7 @@ static int start_node(struct event_base* base, int node_num)
 		strcpy(addr_str, "127.0.0.1");
 	}
 
-	/* create a UDP socket */
-
+	/* create the server socket */
 	evutil_socket_t sock = socket(AF_INET, SOCK_DGRAM, 0);
 	if (sock == -1) {
 		printf("socket() failed\n");
@@ -62,8 +70,7 @@ static int start_node(struct event_base* base, int node_num)
 	}
 	evutil_make_socket_nonblocking(sock);
 
-	/* bind the socket */
-
+	/* bind the server socket */
 	struct sockaddr_storage addr;
 	int len = sizeof(addr);
 	evutil_parse_sockaddr_port(addr_str, (struct sockaddr*)&addr, &len);
@@ -73,13 +80,11 @@ static int start_node(struct event_base* base, int node_num)
 	}
 
 	/* announce the port it is running on */
-
 	getsockname(sock, (struct sockaddr*)&addr, &len);
 	unsigned short port = ntohs(((struct sockaddr_in*)&addr)->sin_port);
 	printf("Using UDP port %hu\n", port);
 
 	/* add it to the event loop */
-
 	struct event *evt =
 		event_new(base, sock, EV_READ | EV_PERSIST, received_data, NULL);
 	if (evt == NULL) {
@@ -88,9 +93,14 @@ static int start_node(struct event_base* base, int node_num)
 	}
 	event_add(evt, NULL);
 
-	/* write the config file if necessary */
+	/* initiate the DTLS server */
+	void *context = NULL;
+	if (dtls_server_init(&context, PRIV_FILE, PUB_FILE) < 0) {
+		return -1;
+	}
 
-	if (node_num == 1 && file_exists(CONFIG_FILE) < 0) {
+	/* write the config file if necessary */
+	if (node_num == 1 && !file_exists(CONFIG_FILE)) {
 		FILE *file = fopen(CONFIG_FILE, "w");
 		if (fprintf(file, "# Forward this UDP port!\n") < 0 ||
 			fprintf(file, "udpsrv\t\t\t%s:%hu\n\n", addr_str, port) < 0 ||
@@ -116,17 +126,15 @@ static int start_node(struct event_base* base, int node_num)
 int main(int argc, char** argv)
 {
 	/* determine if we are running in test mode */
-
 	int count = 1;
 	while (argc > 0) {
 		argc--;
 		if (!strcmp(argv[argc], "--test")) {
-			count = 10;
+			count = 2;
 		}
 	}
 
 	/* start the node(s) and enter the event loop */
-
 	struct event_base *base = event_base_new();
 	for (; count > 0; count--) {
 		if (start_node(base, count) < 0) {

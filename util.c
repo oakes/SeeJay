@@ -12,11 +12,11 @@ int file_exists(char *name)
 {
 	FILE *file = fopen(name, "r");
 	if (file == NULL) {
-		return -1;
+		return 0;
 	}
 
 	fclose(file);
-	return 0;
+	return 1;
 }
 
 /*
@@ -27,7 +27,7 @@ int read_config(char *name, char *key, char *value)
 {
 	FILE *file = fopen(name, "r");
 	if (file == NULL) {
-		return -1;
+		return 0;
 	}
 
 	char buffer[100];
@@ -45,5 +45,5 @@ int read_config(char *name, char *key, char *value)
 	}
 
 	fclose(file);
-	return 0;
+	return 1;
 }

@@ -341,7 +341,7 @@ static int dtls_verify_cookie
  * Initializes the DTLS server.
  */
 
-int dtls_server_init(void **ctx_ptr, char *priv_name, char *pub_name)
+int dtls_server_init(void **ctx_ptr, void *priv_key, void *pub_key)
 {
 	/* initialize the context */
 	OpenSSL_add_ssl_algorithms();
@@ -351,12 +351,12 @@ int dtls_server_init(void **ctx_ptr, char *priv_name, char *pub_name)
 	SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_OFF);
 
 	/* load the files */
-	if (!SSL_CTX_use_certificate_file(ctx, pub_name, SSL_FILETYPE_PEM)) {
-		printf("Failed to load %s\n", pub_name);
+	if (!SSL_CTX_use_certificate(ctx, pub_key)) {
+		printf("Failed to load public key\n");
 		return 0;
 	}
-	if (!SSL_CTX_use_PrivateKey_file(ctx, priv_name, SSL_FILETYPE_PEM)) {
-		printf("Failed to load %s\n", priv_name);
+	if (!SSL_CTX_use_PrivateKey(ctx, priv_key)) {
+		printf("Failed to load private key\n");
 		return 0;
 	}
 	if (!SSL_CTX_check_private_key(ctx)) {

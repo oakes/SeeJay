@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include <errno.h>
 #include <event2/event.h>
 
@@ -10,25 +11,34 @@
 #define PUB_FILE "public.pem"
 #define CONFIG_FILE  "seejay.conf"
 
+struct peer_info {
+	void *cxt; /* points to the global SSL_CTX object */
+	void *ssl; /* points to a specific SSL object */
+};
+
 /*
  * Callback function that is called when a packet is received.
  */
 
-static void received_data(evutil_socket_t sock, short eventType, void* param)
+static void received_data(evutil_socket_t sock, short eventType, void* p)
 {
-	/* this is the listening socket */
-	if (param == NULL) {
+	/* this is the server socket */
+	if (((struct peer_info *)p)->ssl == NULL) {
+		
+	}
+	/* this is a specific peer */
+	else {
 		
 	}
 }
 
 /*
- * Gets the crypto key and initializes the UDP socket.
+ * Gets the crypto keys and initializes the UDP socket.
  */
 
 static int start_node(struct event_base* base, int node_num)
 {
-	/* create or load the key */
+	/* create or load the keys */
 	void *priv = NULL, *pub = NULL;
 	if (node_num > 1 || !file_exists(PRIV_FILE)) {
 		if (!create_private_key(&priv) ||
@@ -84,20 +94,23 @@ static int start_node(struct event_base* base, int node_num)
 	unsigned short port = ntohs(((struct sockaddr_in*)&addr)->sin_port);
 	printf("Using UDP port %hu\n", port);
 
+	/* initiate the DTLS server */
+	void *context = NULL;
+	if (!dtls_server_init(&context, priv, pub)) {
+		return -1;
+	}
+	struct peer_info *p = malloc(sizeof(struct peer_info));
+	p->cxt = context;
+	p->ssl = NULL;
+
 	/* add it to the event loop */
 	struct event *evt =
-		event_new(base, sock, EV_READ | EV_PERSIST, received_data, NULL);
+		event_new(base, sock, EV_READ | EV_PERSIST, received_data, p);
 	if (evt == NULL) {
 		printf("event_new() failed\n");
 		return -1;
 	}
 	event_add(evt, NULL);
-
-	/* initiate the DTLS server */
-	void *context = NULL;
-	if (dtls_server_init(&context, PRIV_FILE, PUB_FILE) < 0) {
-		return -1;
-	}
 
 	/* write the config file if necessary */
 	if (node_num == 1 && !file_exists(CONFIG_FILE)) {

@@ -8,6 +8,6 @@ int read_public_key(void **pub_key, char *name);
 int write_private_key(void *priv_key, char *name);
 int write_public_key(void *pub_key, char *name);
 
-int dtls_server_init(void **ctx_ptr, char *priv_name, char *pub_name);
+int dtls_server_init(void **ctx_ptr, void *priv_key, void *pub_key);
 
 #endif

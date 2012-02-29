@@ -12,19 +12,60 @@
 #define CONFIG_FILE  "seejay.conf"
 
 struct peer_info {
-	void *cxt; /* points to the global SSL_CTX object */
-	void *ssl; /* points to a specific SSL object */
+	struct event_base *base; /* Libevent structure */
+	void *ctx; /* points to the global SSL_CTX structure */
+	void *ssl; /* points to a specific SSL structure */
 };
+
+static evutil_socket_t create_socket(char *addr_str, int *port)
+{
+	/* create the server socket */
+	evutil_socket_t sock = socket(AF_INET, SOCK_DGRAM, 0);
+	if (sock == -1) {
+		printf("socket() failed\n");
+		return -1;
+	}
+	evutil_make_socket_nonblocking(sock);
+
+	/* bind the server socket */
+	struct sockaddr_storage addr;
+	int len = sizeof(addr);
+	evutil_parse_sockaddr_port(addr_str, (struct sockaddr*)&addr, &len);
+	if (bind(sock, (struct sockaddr*)&addr, len)) {
+		printf("bind() failed: %s\n", strerror(errno));
+		return -1;
+	}
+
+	/* announce the port it is running on */
+	getsockname(sock, (struct sockaddr*)&addr, &len);
+	*port = ntohs(((struct sockaddr_in*)&addr)->sin_port);
+
+	return sock;
+}
 
 /*
  * Callback function that is called when a packet is received.
  */
 
-static void received_data(evutil_socket_t sock, short eventType, void* p)
+static void received_data(evutil_socket_t sock, short eventType, void* param)
 {
+	struct peer_info *p = (struct peer_info *)param;
+
+	union {
+		struct sockaddr_storage ss;
+		struct sockaddr_in6 s6;
+		struct sockaddr_in s4;
+	} client_addr;
+
 	/* this is the server socket */
-	if (((struct peer_info *)p)->ssl == NULL) {
-		
+	if (p->ssl == NULL) {
+		void *ssl = NULL;
+		if (!dtls_server_listen(sock, p->ctx, &client_addr, &ssl)) {
+			printf("dtls_server_listen() failed\n");
+		}
+		else {
+			printf("dtls_server_listen() succeeded\n");
+		}
 	}
 	/* this is a specific peer */
 	else {
@@ -36,7 +77,7 @@ static void received_data(evutil_socket_t sock, short eventType, void* p)
  * Gets the crypto keys and initializes the UDP socket.
  */
 
-static int start_node(struct event_base* base, int node_num)
+static evutil_socket_t start_node(struct event_base *base, int node_num)
 {
 	/* create or load the keys */
 	void *priv = NULL, *pub = NULL;
@@ -72,36 +113,21 @@ static int start_node(struct event_base* base, int node_num)
 		strcpy(addr_str, "127.0.0.1");
 	}
 
-	/* create the server socket */
-	evutil_socket_t sock = socket(AF_INET, SOCK_DGRAM, 0);
-	if (sock == -1) {
-		printf("socket() failed\n");
+	/* create the socket */
+	int port;
+	evutil_socket_t sock;
+	if ((sock = create_socket(addr_str, &port)) < 0) {
 		return -1;
 	}
-	evutil_make_socket_nonblocking(sock);
-
-	/* bind the server socket */
-	struct sockaddr_storage addr;
-	int len = sizeof(addr);
-	evutil_parse_sockaddr_port(addr_str, (struct sockaddr*)&addr, &len);
-	if (bind(sock, (struct sockaddr*)&addr, len)) {
-		printf("bind() failed: %s\n", strerror(errno));
-		return -1;
-	}
-
-	/* announce the port it is running on */
-	getsockname(sock, (struct sockaddr*)&addr, &len);
-	unsigned short port = ntohs(((struct sockaddr_in*)&addr)->sin_port);
 	printf("Using UDP port %hu\n", port);
 
 	/* initiate the DTLS server */
-	void *context = NULL;
-	if (!dtls_server_init(&context, priv, pub)) {
+	struct peer_info *p = malloc(sizeof(struct peer_info));
+	p->base = base;
+	p->ctx = p->ssl = NULL;
+	if (!dtls_server_init(&p->ctx, priv, pub)) {
 		return -1;
 	}
-	struct peer_info *p = malloc(sizeof(struct peer_info));
-	p->cxt = context;
-	p->ssl = NULL;
 
 	/* add it to the event loop */
 	struct event *evt =
@@ -149,8 +175,9 @@ int main(int argc, char** argv)
 
 	/* start the node(s) and enter the event loop */
 	struct event_base *base = event_base_new();
+	evutil_socket_t sock;
 	for (; count > 0; count--) {
-		if (start_node(base, count) < 0) {
+		if ((sock = start_node(base, count)) < 0) {
 			return 1;
 		}
 	}

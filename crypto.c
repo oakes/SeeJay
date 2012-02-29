@@ -378,3 +378,21 @@ int dtls_server_init(void **ctx_ptr, void *priv_key, void *pub_key)
 
 	return 1;
 }
+
+int dtls_server_listen(int sock, void *ctx, void *client_addr, void **ssl_ptr)
+{
+	BIO *bio = BIO_new_dgram(sock, BIO_NOCLOSE);
+	SSL *ssl = SSL_new(ctx);
+	SSL_set_bio(ssl, bio, bio);
+	SSL_set_options(ssl, SSL_OP_COOKIE_EXCHANGE);
+
+	if (DTLSv1_listen(ssl, client_addr) <= 0) {
+		BIO_free(bio);
+		SSL_free(ssl);
+		return 0;
+	}
+
+	*ssl_ptr = ssl;
+
+	return 1;
+}

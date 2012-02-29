@@ -9,5 +9,6 @@ int write_private_key(void *priv_key, char *name);
 int write_public_key(void *pub_key, char *name);
 
 int dtls_server_init(void **ctx_ptr, void *priv_key, void *pub_key);
+int dtls_server_listen(int sock, void *ctx, void *client_addr, void **ssl_ptr);
 
 #endif

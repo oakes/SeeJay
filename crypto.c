@@ -7,6 +7,7 @@
 
 /* necessary for dtls_verify_cookie and dtls_create_cookie */
 #include <event2/event.h>
+#include <netinet/in.h>
 
 #include "crypto.h"
 #include "util.h"

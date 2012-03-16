@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <event2/event.h>
+#include <netinet/in.h>
 
 #include "crypto.h"
 #include "util.h"
@@ -16,6 +17,10 @@ struct peer_info {
 	void *ctx; /* points to the global SSL_CTX structure */
 	void *ssl; /* points to a specific SSL structure */
 };
+
+/*
+ * Creates and binds a socket, providing the port number via pointer.
+ */
 
 static evutil_socket_t create_socket(char *addr_str, int *port)
 {
@@ -36,7 +41,7 @@ static evutil_socket_t create_socket(char *addr_str, int *port)
 		return -1;
 	}
 
-	/* announce the port it is running on */
+	/* provide the port it is running on */
 	getsockname(sock, (struct sockaddr*)&addr, &len);
 	*port = ntohs(((struct sockaddr_in*)&addr)->sin_port);
 
@@ -141,12 +146,12 @@ static evutil_socket_t start_node(struct event_base *base, int node_num)
 	/* write the config file if necessary */
 	if (node_num == 1 && !file_exists(CONFIG_FILE)) {
 		FILE *file = fopen(CONFIG_FILE, "w");
-		if (fprintf(file, "# Forward this UDP port!\n") < 0 ||
+		if (fprintf(file, "# Port to accept peers on (forward it!)\n") < 0 ||
 			fprintf(file, "udpsrv\t\t\t%s:%hu\n\n", addr_str, port) < 0 ||
-			fprintf(file, "# Only used locally by SOCKS-enabled apps\n") < 0 ||
+			fprintf(file, "# Port used locally by SOCKS-enabled apps\n") < 0 ||
 			fprintf(file, "socsrv\t\t\t%s:9050\n\n", addr_str) < 0 ||
-			fprintf(file, "# Put your IP here to accept connections\n") < 0 ||
-			fprintf(file, "ext-ip\t\t\t?\n\n") < 0)
+			fprintf(file, "# If YES, you'll find peers automatically\n") < 0 ||
+			fprintf(file, "autoip\t\t\tYES\n\n") < 0)
 		{
 			printf("Failed to write config\n");
 			fclose(file);

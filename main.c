@@ -22,9 +22,10 @@ struct peer_info {
  * Creates and binds a socket, providing the port number via pointer.
  */
 
-static evutil_socket_t create_socket(char *addr_str, int *port)
+static evutil_socket_t create_socket
+	(char *addr_str, int *port, struct sockaddr_storage *addr)
 {
-	/* create the server socket */
+	/* create the socket */
 	evutil_socket_t sock = socket(AF_INET, SOCK_DGRAM, 0);
 	if (sock == -1) {
 		printf("socket() failed\n");
@@ -32,18 +33,26 @@ static evutil_socket_t create_socket(char *addr_str, int *port)
 	}
 	evutil_make_socket_nonblocking(sock);
 
-	/* bind the server socket */
-	struct sockaddr_storage addr;
-	int len = sizeof(addr);
-	evutil_parse_sockaddr_port(addr_str, (struct sockaddr*)&addr, &len);
-	if (bind(sock, (struct sockaddr*)&addr, len)) {
+	/* bind the socket */
+	int len = sizeof(struct sockaddr_storage);
+	evutil_parse_sockaddr_port(addr_str, (struct sockaddr*)addr, &len);
+	if (bind(sock, (struct sockaddr*)addr, len)) {
 		printf("bind() failed: %s\n", strerror(errno));
 		return -1;
 	}
 
 	/* provide the port it is running on */
-	getsockname(sock, (struct sockaddr*)&addr, &len);
-	*port = ntohs(((struct sockaddr_in*)&addr)->sin_port);
+	getsockname(sock, (struct sockaddr*)addr, &len);
+	if (addr->ss_family == AF_INET) {
+		*port = ntohs(((struct sockaddr_in*)addr)->sin_port);
+	}
+	else if (addr->ss_family == AF_INET6) {
+		*port = ntohs(((struct sockaddr_in6*)addr)->sin6_port);
+	}
+	else {
+		printf("Address type not recognized\n");
+		return -1;
+	}
 
 	return sock;
 }
@@ -56,16 +65,10 @@ static void received_data(evutil_socket_t sock, short eventType, void* param)
 {
 	struct peer_info *p = (struct peer_info *)param;
 
-	union {
-		struct sockaddr_storage ss;
-		struct sockaddr_in6 s6;
-		struct sockaddr_in s4;
-	} client_addr;
-
 	/* this is the server socket */
 	if (p->ssl == NULL) {
 		void *ssl = NULL;
-		if (!dtls_server_listen(sock, p->ctx, &client_addr, &ssl)) {
+		if (!dtls_server_listen(&ssl, sock, p->ctx)) {
 			printf("dtls_server_listen() failed\n");
 		}
 		else {
@@ -88,7 +91,7 @@ static evutil_socket_t start_node(struct event_base *base, int node_num)
 	void *priv = NULL, *pub = NULL;
 	if (node_num > 1 || !file_exists(PRIV_FILE)) {
 		if (!create_private_key(&priv) ||
-			!create_public_key(priv, &pub))
+			!create_public_key(&pub, priv))
 		{
 			return -1;
 		}
@@ -120,8 +123,9 @@ static evutil_socket_t start_node(struct event_base *base, int node_num)
 
 	/* create the socket */
 	int port;
+	struct sockaddr_storage addr;
 	evutil_socket_t sock;
-	if ((sock = create_socket(addr_str, &port)) < 0) {
+	if ((sock = create_socket(addr_str, &port, &addr)) < 0) {
 		return -1;
 	}
 	printf("Using UDP port %hu\n", port);

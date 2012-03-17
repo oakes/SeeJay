@@ -46,7 +46,7 @@ int create_private_key(void **priv_key) {
  * Creates a public certificate from the supplied private key.
  */
 
-int create_public_key(void *priv_key, void **pub_key)
+int create_public_key(void **pub_key, void *priv_key)
 {
 	/* create X509 request */
 	X509_REQ *req = NULL;
@@ -380,16 +380,48 @@ int dtls_server_init(void **ctx_ptr, void *priv_key, void *pub_key)
 	return 1;
 }
 
-int dtls_server_listen(int sock, void *ctx, void *client_addr, void **ssl_ptr)
+int dtls_server_listen(void **ssl_ptr, int sock, void *ctx)
 {
 	BIO *bio = BIO_new_dgram(sock, BIO_NOCLOSE);
 	SSL *ssl = SSL_new(ctx);
 	SSL_set_bio(ssl, bio, bio);
 	SSL_set_options(ssl, SSL_OP_COOKIE_EXCHANGE);
 
-	if (DTLSv1_listen(ssl, client_addr) <= 0) {
+	union {
+		struct sockaddr_storage ss;
+		struct sockaddr_in6 s6;
+		struct sockaddr_in s4;
+	} client_addr;
+
+	if (DTLSv1_listen(ssl, &client_addr) <= 0) {
 		BIO_free(bio);
 		SSL_free(ssl);
+		return 0;
+	}
+
+	*ssl_ptr = ssl;
+
+	return 1;
+}
+
+/*
+ * Initializes the DTLS client.
+ */
+
+int dtls_client_init(void **ssl_ptr, int sock, void *ctx, void *remote_addr)
+{
+	struct timeval timeout;
+	timeout.tv_sec = 3;
+	timeout.tv_usec = 0;
+
+	BIO *bio = BIO_new_dgram(sock, BIO_CLOSE);
+	BIO_ctrl(bio, BIO_CTRL_DGRAM_SET_CONNECTED, 0, remote_addr);
+	BIO_ctrl(bio, BIO_CTRL_DGRAM_SET_RECV_TIMEOUT, 0, &timeout);
+	SSL *ssl = SSL_new(ctx);
+	SSL_set_bio(ssl, bio, bio);
+
+	if (SSL_connect(ssl) < 0) {
+		printf("SSL_connect() failed\n");
 		return 0;
 	}
 

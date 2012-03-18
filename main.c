@@ -23,48 +23,27 @@ struct peer_info {
 };
 
 /*
- * Callback function that is called when the server receives a packet.
+ * Callback function that is called when packets are received.
  */
 
-static void server_recv(evutil_socket_t sock, short eventType, void* param)
+static void received_data(evutil_socket_t sock, short eventType, void *param)
 {
 	struct peer_info *p = (struct peer_info *)param;
 
-	printf("server_recv()\n");
-}
-
-/*
- * Callback function that is called when the client receives a packet.
- */
-
-static void client_recv(struct bufferevent *bev, void *param)
-{
-	struct peer_info *p = (struct peer_info *)param;
-
-	printf("client_recv()\n");
-}
-
-static void client_event(struct bufferevent *bev, short what, void *param)
-{
-	struct peer_info *p = (struct peer_info *)param;
-
-	if (what == BEV_EVENT_ERROR) {
-		printf("Unrecoverable error encountered\n");
-	}
+	printf("received_data()\n");
 }
 
 /*
  * Creates and binds a socket to accept packets.
  */
 
-static int create_server
-	(struct event_base *base, void *ctx, char *addr, int *port)
+static evutil_socket_t create_socket(char *addr, int *port)
 {
 	/* create server socket */
 	evutil_socket_t sock = socket(AF_INET, SOCK_DGRAM, 0);
 	if (sock == -1) {
 		printf("socket() failed\n");
-		return 0;
+		return -1;
 	}
 	evutil_make_socket_nonblocking(sock);
 
@@ -74,7 +53,7 @@ static int create_server
 	evutil_parse_sockaddr_port(addr, (struct sockaddr *)&ss, &len);
 	if (bind(sock, (struct sockaddr *)&ss, len)) {
 		printf("bind() failed: %s\n", strerror(errno));
-		return 0;
+		return -1;
 	}
 
 	/* provide the port it is running on */
@@ -87,63 +66,10 @@ static int create_server
 	}
 	else {
 		printf("Address type not recognized\n");
-		return 0;
+		return -1;
 	}
 
-	/* create the struct to pass to the callback function */
-	struct peer_info *p = malloc(sizeof(struct peer_info));
-	p->base = base;
-	p->ctx = ctx;
-	p->ssl = p->bev = NULL;
-
-	/* add it to the event loop */
-	struct event *evt =
-		event_new(base, sock, EV_READ | EV_PERSIST, server_recv, p);
-	if (evt == NULL) {
-		printf("event_new() failed\n");
-		return 0;
-	}
-	event_add(evt, NULL);
-
-	return 1;
-}
-
-/*
- * Creates a connection with a remote host.
- */
-
-static int create_client(struct event_base *base, void *ctx, char *addr)
-{
-	/* create a new SSL object */
-	void *ssl = NULL;
-	if (!dtls_instance_init(&ssl, ctx)) {
-		return 0;
-	}
-
-	/* create client socket */
-	struct bufferevent *bev = bufferevent_openssl_socket_new
-		(base, -1, ssl, BUFFEREVENT_SSL_CONNECTING, BEV_OPT_CLOSE_ON_FREE);
-
-	/* create the struct to pass to the callback function */
-	struct peer_info *p = malloc(sizeof(struct peer_info));
-	p->base = base;
-	p->ctx = ctx;
-	p->ssl = ssl;
-	p->bev = bev;
-
-	bufferevent_setcb(bev, client_recv, NULL, client_event, p);
-	bufferevent_enable(bev, EV_READ | EV_WRITE);
-
-	/* connect to the address */
-	struct sockaddr_storage ss;
-	int len = sizeof(struct sockaddr_storage);
-	evutil_parse_sockaddr_port(addr, (struct sockaddr *)&ss, &len);
-	if (bufferevent_socket_connect(bev, (struct sockaddr *)&ss, len) < 0) {
-		printf("bufferevent_socket_connect() failed\n");
-		return 0;
-	}
-
-	return 1;
+	return sock;
 }
 
 /*
@@ -186,18 +112,34 @@ static int start_node(struct event_base *base, int node_num)
 		strcpy(addr, "127.0.0.1");
 	}
 
+	/* create the server socket */
+	int port;
+	evutil_socket_t sock;
+	if ((sock = create_socket(addr, &port)) < 0) {
+		return 0;
+	}
+	printf("Using UDP port %hu\n", port);
+
 	/* create the DTLS context */
 	void *ctx = NULL;
 	if (!dtls_global_init(&ctx, priv, pub)) {
 		return 0;
 	}
 
-	/* create the server */
-	int port;
-	if (!create_server(base, ctx, addr, &port)) {
-		return 0;
+	/* create the struct to pass to the callback function */
+	struct peer_info *p = malloc(sizeof(struct peer_info));
+	p->base = base;
+	p->ctx = ctx;
+	p->ssl = p->bev = NULL;
+
+	/* add it to the event loop */
+	struct event *evt =
+		event_new(base, sock, EV_READ | EV_PERSIST, received_data, p);
+	if (evt == NULL) {
+		printf("event_new() failed\n");
+		return -1;
 	}
-	printf("Using UDP port %hu\n", port);
+	event_add(evt, NULL);
 
 	/* write the config file if necessary */
 	if (node_num == 1 && !file_exists(CONFIG_FILE)) {
@@ -217,7 +159,26 @@ static int start_node(struct event_base *base, int node_num)
 	}
 
 	if (node_num > 1) {
-		create_client(base, ctx, "127.0.0.1:63306");
+		int port2;
+		evutil_socket_t sock2;
+		if ((sock2 = create_socket("127.0.0.1", &port2)) < 0) {
+			return 0;
+		}
+
+		struct sockaddr_storage ss;
+		int len = sizeof(struct sockaddr_storage);
+		evutil_parse_sockaddr_port
+			("127.0.0.1:63306", (struct sockaddr *)&ss, &len);
+		if (connect(sock2, (struct sockaddr *)&ss, len) < 0) {
+			printf("connect() failed\n");
+			return 0;
+		}
+
+		void *ssl2;
+		if (!dtls_client_init(&ssl2, sock2, ctx, &ss)) {
+			printf("%s\n", strerror(errno));
+			return 0;
+		}
 	}
 
 	return 1;

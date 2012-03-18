@@ -381,12 +381,28 @@ int dtls_global_init(void **ctx_ptr, void *priv_key, void *pub_key)
 }
 
 /*
- * Initializes an SSL structure.
+ * Initializes a DTLS client.
  */
 
-int dtls_instance_init(void **ssl_ptr, void *ctx)
+int dtls_client_init(void **ssl_ptr, int sock, void *ctx, void *addr)
 {
+	struct timeval timeout;
+	timeout.tv_sec = 3;
+	timeout.tv_usec = 0;
+
+	BIO *bio = BIO_new_dgram(sock, BIO_CLOSE);
+	BIO_ctrl(bio, BIO_CTRL_DGRAM_SET_RECV_TIMEOUT, 0, &timeout);
+	BIO_ctrl(bio, BIO_CTRL_DGRAM_SET_CONNECTED, 0, addr);
 	SSL *ssl = SSL_new(ctx);
+	SSL_set_connect_state(ssl);
+	SSL_set_bio(ssl, bio, bio);
+
+	if (SSL_connect(ssl) < 0) {
+		printf("SSL_connect() failed\n");
+		return 0;
+	}
+
 	*ssl_ptr = ssl;
+
 	return 1;
 }

@@ -339,15 +339,15 @@ static int dtls_verify_cookie
 }
 
 /*
- * Initializes the DTLS server.
+ * Initializes the DTLS context.
  */
 
-int dtls_server_init(void **ctx_ptr, void *priv_key, void *pub_key)
+int dtls_global_init(void **ctx_ptr, void *priv_key, void *pub_key)
 {
-	/* initialize the context */
+	/* create the context */
 	OpenSSL_add_ssl_algorithms();
 	SSL_load_error_strings();
-	SSL_CTX *ctx = SSL_CTX_new(DTLSv1_server_method());
+	SSL_CTX *ctx = SSL_CTX_new(DTLSv1_method());
 	SSL_CTX_set_cipher_list(ctx, "AES256-SHA");
 	SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_OFF);
 
@@ -371,61 +371,22 @@ int dtls_server_init(void **ctx_ptr, void *priv_key, void *pub_key)
 		SSL_VERIFY_PEER | SSL_VERIFY_CLIENT_ONCE,
 		dtls_verify_callback
 	);
+
 	SSL_CTX_set_read_ahead(ctx, 1);
 	SSL_CTX_set_cookie_generate_cb(ctx, dtls_create_cookie);
 	SSL_CTX_set_cookie_verify_cb(ctx, dtls_verify_cookie);
-
 	*ctx_ptr = ctx;
 
 	return 1;
 }
 
-int dtls_server_listen(void **ssl_ptr, int sock, void *ctx)
-{
-	BIO *bio = BIO_new_dgram(sock, BIO_NOCLOSE);
-	SSL *ssl = SSL_new(ctx);
-	SSL_set_bio(ssl, bio, bio);
-	SSL_set_options(ssl, SSL_OP_COOKIE_EXCHANGE);
-
-	union {
-		struct sockaddr_storage ss;
-		struct sockaddr_in6 s6;
-		struct sockaddr_in s4;
-	} client_addr;
-
-	if (DTLSv1_listen(ssl, &client_addr) <= 0) {
-		BIO_free(bio);
-		SSL_free(ssl);
-		return 0;
-	}
-
-	*ssl_ptr = ssl;
-
-	return 1;
-}
-
 /*
- * Initializes the DTLS client.
+ * Initializes an SSL structure.
  */
 
-int dtls_client_init(void **ssl_ptr, int sock, void *ctx, void *remote_addr)
+int dtls_instance_init(void **ssl_ptr, void *ctx)
 {
-	struct timeval timeout;
-	timeout.tv_sec = 3;
-	timeout.tv_usec = 0;
-
-	BIO *bio = BIO_new_dgram(sock, BIO_CLOSE);
-	BIO_ctrl(bio, BIO_CTRL_DGRAM_SET_CONNECTED, 0, remote_addr);
-	BIO_ctrl(bio, BIO_CTRL_DGRAM_SET_RECV_TIMEOUT, 0, &timeout);
 	SSL *ssl = SSL_new(ctx);
-	SSL_set_bio(ssl, bio, bio);
-
-	if (SSL_connect(ssl) < 0) {
-		printf("SSL_connect() failed\n");
-		return 0;
-	}
-
 	*ssl_ptr = ssl;
-
 	return 1;
 }

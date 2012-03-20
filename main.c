@@ -6,6 +6,7 @@
 #include <netinet/in.h>
 #include <event2/event.h>
 #include <event2/bufferevent.h>
+#include <event2/bufferevent_ssl.h>
 
 #include "crypto.h"
 #include "util.h"
@@ -18,61 +19,18 @@ struct peer_info {
 	struct event_base *base; /* Libevent structure */
 	void *ctx; /* points to the global SSL_CTX structure */
 	void *ssl; /* points to a specific SSL structure */
+	void *bev; /* points to a bufferevent structure */
 };
 
 /*
- * Callback for receiving packets.
+ * Callback function that is called when packets are received.
  */
 
-static void on_read(struct bufferevent *bev, void *param)
+static void received_data(evutil_socket_t sock, short eventType, void *param)
 {
-	struct peer_info *p = param;
+	struct peer_info *p = (struct peer_info *)param;
 
-	char buf[1024];
-	bufferevent_read(bev, buf, sizeof(buf));
-	printf("on_read(): %s\n", buf);
-}
-
-/*
- * Callback for sending packets.
- */
-
-static void on_write(struct bufferevent *bev, void *param)
-{
-	struct peer_info *p = param;
-
-	printf("on_write()\n");
-}
-
-/*
- * Callback for socket events.
- */
-
-static void on_event(struct bufferevent *bev, short events, void *params)
-{
-	
-}
-
-/*
- * Creates a new event with the given socket.
- */
-
-static struct bufferevent * create_event
-	(struct event_base *base, void *ctx, evutil_socket_t sock)
-{
-	/* create the struct to pass to the callback function */
-	struct peer_info *p = malloc(sizeof(struct peer_info));
-	p->base = base;
-	p->ctx = ctx;
-	p->ssl = NULL;
-
-	/* create the bufferevent */
-	struct bufferevent *bev =
-		bufferevent_socket_new(base, sock, BEV_OPT_CLOSE_ON_FREE);
-	bufferevent_setcb(bev, on_read, on_write, on_event, p);
-	bufferevent_enable(bev, EV_READ|EV_WRITE);
-
-	return bev;
+	printf("received_data()\n");
 }
 
 /*
@@ -168,8 +126,20 @@ static int start_node(struct event_base *base, int node_num)
 		return 0;
 	}
 
+	/* create the struct to pass to the callback function */
+	struct peer_info *p = malloc(sizeof(struct peer_info));
+	p->base = base;
+	p->ctx = ctx;
+	p->ssl = p->bev = NULL;
+
 	/* add it to the event loop */
-	struct bufferevent *bev = create_event(base, ctx, sock);
+	struct event *evt =
+		event_new(base, sock, EV_READ | EV_PERSIST, received_data, p);
+	if (evt == NULL) {
+		printf("event_new() failed\n");
+		return -1;
+	}
+	event_add(evt, NULL);
 
 	/* write the config file if necessary */
 	if (node_num == 1 && !file_exists(CONFIG_FILE)) {
@@ -194,18 +164,21 @@ static int start_node(struct event_base *base, int node_num)
 		if ((sock2 = create_socket("127.0.0.1", &port2)) < 0) {
 			return 0;
 		}
-		struct bufferevent *bev2 = create_event(base, ctx, sock2);
 
 		struct sockaddr_storage ss;
 		int len = sizeof(struct sockaddr_storage);
 		evutil_parse_sockaddr_port
 			("127.0.0.1:63306", (struct sockaddr *)&ss, &len);
-		if (bufferevent_socket_connect(bev2, (struct sockaddr *)&ss, len)) {
+		if (connect(sock2, (struct sockaddr *)&ss, len) < 0) {
 			printf("connect() failed\n");
 			return 0;
 		}
 
-		bufferevent_write(bev2, "hello", sizeof("hello"));
+		void *ssl2;
+		if (!dtls_client_init(&ssl2, sock2, ctx, &ss)) {
+			printf("%s\n", strerror(errno));
+			return 0;
+		}
 	}
 
 	return 1;

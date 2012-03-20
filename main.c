@@ -5,8 +5,6 @@
 #include <signal.h>
 #include <netinet/in.h>
 #include <event2/event.h>
-#include <event2/bufferevent.h>
-#include <event2/bufferevent_ssl.h>
 
 #include "crypto.h"
 #include "util.h"
@@ -19,7 +17,6 @@ struct peer_info {
 	struct event_base *base; /* Libevent structure */
 	void *ctx; /* points to the global SSL_CTX structure */
 	void *ssl; /* points to a specific SSL structure */
-	void *bev; /* points to a bufferevent structure */
 };
 
 /*
@@ -28,7 +25,7 @@ struct peer_info {
 
 static void received_data(evutil_socket_t sock, short eventType, void *param)
 {
-	struct peer_info *p = (struct peer_info *)param;
+	struct peer_info *p = param;
 
 	printf("received_data()\n");
 }
@@ -130,7 +127,7 @@ static int start_node(struct event_base *base, int node_num)
 	struct peer_info *p = malloc(sizeof(struct peer_info));
 	p->base = base;
 	p->ctx = ctx;
-	p->ssl = p->bev = NULL;
+	p->ssl = NULL;
 
 	/* add it to the event loop */
 	struct event *evt =

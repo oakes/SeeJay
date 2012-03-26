@@ -1,17 +1,13 @@
 #include <stdio.h>
 #include <string.h>
-#include <netinet/in.h>
 
 #include <openssl/ssl.h>
 #include <openssl/bio.h>
 #include <openssl/err.h>
 #include <openssl/rand.h>
-#include <event2/event.h>
 
 #include "crypto.h"
 #include "util.h"
-
-#define COOKIE_SECRET_LENGTH 16
 
 /*
  * Generates an RSA-2048 private key.

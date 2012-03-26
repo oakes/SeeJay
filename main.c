@@ -4,7 +4,10 @@
 #include <errno.h>
 #include <signal.h>
 #include <netinet/in.h>
+
 #include <event2/event.h>
+#include <event2/listener.h>
+#include <event2/bufferevent_ssl.h>
 
 #include "crypto.h"
 #include "util.h"
@@ -13,21 +16,60 @@
 #define PUB_FILE "public.pem"
 #define CONFIG_FILE  "seejay.conf"
 
-struct peer_info {
-	struct event_base *base; /* Libevent structure */
-	void *ctx; /* points to the global SSL_CTX structure */
-	void *ssl; /* points to a specific SSL structure */
-};
-
 /*
- * Callback function that is called when packets are received.
+ * Callback function when receiving data.
  */
 
-static void received_data(evutil_socket_t sock, short eventType, void *param)
+static void on_read(struct bufferevent *bev, void *ctx)
 {
-	struct peer_info *p = param;
+	printf("on_read()\n");
+}
 
-	printf("received_data()\n");
+/*
+ * Callback function when writing data.
+ */
+
+static void on_write(struct bufferevent *bev, void *ctx)
+{
+	printf("on_write()\n");
+}
+
+/*
+ * Callback function when misc events happen.
+ */
+
+static void on_event(struct bufferevent *bev, short what, void *ctx)
+{
+	printf("on_event()\n");
+}
+
+/*
+ * Callback function when connection is accepted.
+ */
+
+static void on_accept
+	(struct evconnlistener *serv,
+	evutil_socket_t sock,
+	struct sockaddr *addr,
+	int addr_len,
+	void *ctx)
+{
+	printf("on_accept()\n");
+}
+
+/*
+ * Creates a new event with the given socket.
+ */
+
+static struct bufferevent * create_event
+	(struct event_base *base, void *ctx, int is_server)
+{
+	struct bufferevent *bev = bufferevent_openssl_socket_new(base, -1, ctx,
+		is_server ? BUFFEREVENT_SSL_CONNECTING : BUFFEREVENT_SSL_ACCEPTING,
+		BEV_OPT_CLOSE_ON_FREE);
+	bufferevent_enable(bev, EV_READ | EV_WRITE);
+	bufferevent_setcb(bev, on_read, on_write, on_event, ctx);
+	return bev;
 }
 
 /*
@@ -36,8 +78,8 @@ static void received_data(evutil_socket_t sock, short eventType, void *param)
 
 static evutil_socket_t create_socket(char *addr, int *port)
 {
-	/* create server socket */
-	evutil_socket_t sock = socket(AF_INET, SOCK_DGRAM, 0);
+	/* create a socket */
+	evutil_socket_t sock = socket(AF_INET, SOCK_STREAM, 0);
 	if (sock == -1) {
 		printf("socket() failed\n");
 		return -1;
@@ -117,26 +159,15 @@ static int start_node(struct event_base *base, int node_num)
 	}
 	printf("Using UDP port %hu\n", port);
 
-	/* create the DTLS context */
+	/* create the context */
 	void *ctx = NULL;
-	if (!dtls_global_init(&ctx, priv, pub)) {
+	if (!tls_init(&ctx, priv, pub)) {
 		return 0;
 	}
 
-	/* create the struct to pass to the callback function */
-	struct peer_info *p = malloc(sizeof(struct peer_info));
-	p->base = base;
-	p->ctx = ctx;
-	p->ssl = NULL;
-
 	/* add it to the event loop */
-	struct event *evt =
-		event_new(base, sock, EV_READ | EV_PERSIST, received_data, p);
-	if (evt == NULL) {
-		printf("event_new() failed\n");
-		return -1;
-	}
-	event_add(evt, NULL);
+	struct evconnlistener *conn = evconnlistener_new(base, on_accept, ctx,
+		LEV_OPT_CLOSE_ON_FREE | LEV_OPT_REUSEABLE, 1024, sock);
 
 	/* write the config file if necessary */
 	if (node_num == 1 && !file_exists(CONFIG_FILE)) {
@@ -153,29 +184,6 @@ static int start_node(struct event_base *base, int node_num)
 			return 0;
 		}
 		fclose(file);
-	}
-
-	if (node_num > 1) {
-		int port2;
-		evutil_socket_t sock2;
-		if ((sock2 = create_socket("127.0.0.1", &port2)) < 0) {
-			return 0;
-		}
-
-		struct sockaddr_storage ss;
-		int len = sizeof(struct sockaddr_storage);
-		evutil_parse_sockaddr_port
-			("127.0.0.1:63306", (struct sockaddr *)&ss, &len);
-		if (connect(sock2, (struct sockaddr *)&ss, len) < 0) {
-			printf("connect() failed\n");
-			return 0;
-		}
-
-		void *ssl2;
-		if (!dtls_client_init(&ssl2, sock2, ctx, &ss)) {
-			printf("%s\n", strerror(errno));
-			return 0;
-		}
 	}
 
 	return 1;
@@ -200,10 +208,8 @@ int main(int argc, char** argv)
 
 	/* start the node(s) and enter the event loop */
 	struct event_base *base = event_base_new();
-	//for (; count > 0; count--) {
-	int i = 1;
-	for (; i <= count; i++) {
-		if (!start_node(base, i)) {
+	for (; count > 0; count--) {
+		if (!start_node(base, count)) {
 			return 1;
 		}
 	}

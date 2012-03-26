@@ -1,11 +1,10 @@
 #include <stdio.h>
 #include <string.h>
+
 #include <openssl/ssl.h>
 #include <openssl/bio.h>
 #include <openssl/err.h>
 #include <openssl/rand.h>
-
-/* necessary for dtls_verify_cookie and dtls_create_cookie */
 #include <event2/event.h>
 #include <netinet/in.h>
 
@@ -172,7 +171,7 @@ int read_public_key(void **pub_key, char *name)
  * Determines if we trust the certificate we've received.
  */
 
-static int dtls_verify_callback (int ok, X509_STORE_CTX *ctx) {
+static int tls_verify_callback (int ok, X509_STORE_CTX *ctx) {
 	return 1;
 }
 
@@ -180,7 +179,7 @@ static int dtls_verify_callback (int ok, X509_STORE_CTX *ctx) {
  * Creates the cookie necessary for the DTLS handshake.
  */
 
-static int dtls_create_cookie
+static int tls_create_cookie
 	(SSL *ssl, unsigned char *cookie, unsigned int *cookie_len)
 {
 	unsigned char cookie_secret[COOKIE_SECRET_LENGTH];
@@ -263,7 +262,7 @@ static int dtls_create_cookie
  * Verifies the cookie necessary for the DTLS handshake.
  */
 
-static int dtls_verify_cookie
+static int tls_verify_cookie
 	(SSL *ssl, unsigned char *cookie, unsigned int cookie_len)
 {
 	unsigned char cookie_secret[COOKIE_SECRET_LENGTH];
@@ -342,12 +341,12 @@ static int dtls_verify_cookie
  * Initializes the DTLS context.
  */
 
-int dtls_global_init(void **ctx_ptr, void *priv_key, void *pub_key)
+int tls_init(void **ctx_ptr, void *priv_key, void *pub_key)
 {
 	/* create the context */
-	OpenSSL_add_ssl_algorithms();
+	SSL_library_init();
 	SSL_load_error_strings();
-	SSL_CTX *ctx = SSL_CTX_new(DTLSv1_method());
+	SSL_CTX *ctx = SSL_CTX_new(SSLv3_method());
 	SSL_CTX_set_cipher_list(ctx, "AES256-SHA");
 	SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_OFF);
 
@@ -369,40 +368,13 @@ int dtls_global_init(void **ctx_ptr, void *priv_key, void *pub_key)
 	SSL_CTX_set_verify(
 		ctx,
 		SSL_VERIFY_PEER | SSL_VERIFY_CLIENT_ONCE,
-		dtls_verify_callback
+		tls_verify_callback
 	);
 
 	SSL_CTX_set_read_ahead(ctx, 1);
-	SSL_CTX_set_cookie_generate_cb(ctx, dtls_create_cookie);
-	SSL_CTX_set_cookie_verify_cb(ctx, dtls_verify_cookie);
+	SSL_CTX_set_cookie_generate_cb(ctx, tls_create_cookie);
+	SSL_CTX_set_cookie_verify_cb(ctx, tls_verify_cookie);
 	*ctx_ptr = ctx;
-
-	return 1;
-}
-
-/*
- * Initializes a DTLS client.
- */
-
-int dtls_client_init(void **ssl_ptr, int sock, void *ctx, void *addr)
-{
-	struct timeval timeout;
-	timeout.tv_sec = 3;
-	timeout.tv_usec = 0;
-
-	BIO *bio = BIO_new_dgram(sock, BIO_CLOSE);
-	BIO_ctrl(bio, BIO_CTRL_DGRAM_SET_RECV_TIMEOUT, 0, &timeout);
-	BIO_ctrl(bio, BIO_CTRL_DGRAM_SET_CONNECTED, 0, addr);
-	SSL *ssl = SSL_new(ctx);
-	SSL_set_connect_state(ssl);
-	SSL_set_bio(ssl, bio, bio);
-
-	if (SSL_connect(ssl) < 0) {
-		printf("SSL_connect() failed\n");
-		return 0;
-	}
-
-	*ssl_ptr = ssl;
 
 	return 1;
 }

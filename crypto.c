@@ -176,168 +176,6 @@ static int tls_verify_callback (int ok, X509_STORE_CTX *ctx) {
 }
 
 /*
- * Creates the cookie necessary for the TLS handshake.
- */
-
-static int tls_create_cookie
-	(SSL *ssl, unsigned char *cookie, unsigned int *cookie_len)
-{
-	unsigned char cookie_secret[COOKIE_SECRET_LENGTH];
-	int cookie_initialized = 0;
-	unsigned char *buffer, result[EVP_MAX_MD_SIZE];
-	unsigned int length = 0, resultlength;
-	union {
-		struct sockaddr_storage ss;
-		struct sockaddr_in6 s6;
-		struct sockaddr_in s4;
-	} peer;
-
-	/* initialize a random secret */
-	if (!cookie_initialized) {
-		if (!RAND_bytes(cookie_secret, COOKIE_SECRET_LENGTH)) {
-			printf("Error setting random cookie secret\n");
-			return 0;
-		}
-		cookie_initialized = 1;
-	}
-
-	/* read peer information */
-	(void) BIO_dgram_get_peer(SSL_get_rbio(ssl), &peer);
-
-	/* create buffer with peer's address and port */
-	length = 0;
-	switch (peer.ss.ss_family) {
-		case AF_INET:
-			length += sizeof(struct in_addr);
-			break;
-		case AF_INET6:
-			length += sizeof(struct in6_addr);
-			break;
-		default:
-			OPENSSL_assert(0);
-			break;
-	}
-	length += sizeof(in_port_t);
-	buffer = (unsigned char*) OPENSSL_malloc(length);
-
-	if (buffer == NULL) {
-		printf("Out of memory\n");
-		return 0;
-	}
-
-	switch (peer.ss.ss_family) {
-		case AF_INET:
-			memcpy(buffer,
-			       &peer.s4.sin_port,
-			       sizeof(in_port_t));
-			memcpy(buffer + sizeof(peer.s4.sin_port),
-			       &peer.s4.sin_addr,
-			       sizeof(struct in_addr));
-			break;
-		case AF_INET6:
-			memcpy(buffer,
-			       &peer.s6.sin6_port,
-			       sizeof(in_port_t));
-			memcpy(buffer + sizeof(in_port_t),
-			       &peer.s6.sin6_addr,
-			       sizeof(struct in6_addr));
-			break;
-		default:
-			OPENSSL_assert(0);
-			break;
-	}
-
-	/* calculate HMAC of buffer using the secret */
-	HMAC(EVP_sha1(), (const void*) cookie_secret, COOKIE_SECRET_LENGTH,
-	     (const unsigned char*) buffer, length, result, &resultlength);
-	OPENSSL_free(buffer);
-
-	memcpy(cookie, result, resultlength);
-	*cookie_len = resultlength;
-
-	return 1;
-}
-
-/*
- * Verifies the cookie necessary for the TLS handshake.
- */
-
-static int tls_verify_cookie
-	(SSL *ssl, unsigned char *cookie, unsigned int cookie_len)
-{
-	unsigned char cookie_secret[COOKIE_SECRET_LENGTH];
-	int cookie_initialized = 0;
-	unsigned char *buffer, result[EVP_MAX_MD_SIZE];
-	unsigned int length = 0, resultlength;
-	union {
-		struct sockaddr_storage ss;
-		struct sockaddr_in6 s6;
-		struct sockaddr_in s4;
-	} peer;
-
-	/* if secret isn't initialized yet, the cookie can't be valid */
-	if (!cookie_initialized) {
-		return 0;
-	}
-
-	/* cead peer information */
-	(void) BIO_dgram_get_peer(SSL_get_rbio(ssl), &peer);
-
-	/* create buffer with peer's address and port */
-	length = 0;
-	switch (peer.ss.ss_family) {
-		case AF_INET:
-			length += sizeof(struct in_addr);
-			break;
-		case AF_INET6:
-			length += sizeof(struct in6_addr);
-			break;
-		default:
-			OPENSSL_assert(0);
-			break;
-	}
-	length += sizeof(in_port_t);
-	buffer = (unsigned char*) OPENSSL_malloc(length);
-
-	if (buffer == NULL) {
-		printf("Out of memory\n");
-		return 0;
-	}
-
-	switch (peer.ss.ss_family) {
-		case AF_INET:
-			memcpy(buffer,
-			       &peer.s4.sin_port,
-			       sizeof(in_port_t));
-			memcpy(buffer + sizeof(in_port_t),
-			       &peer.s4.sin_addr,
-			       sizeof(struct in_addr));
-			break;
-		case AF_INET6:
-			memcpy(buffer,
-			       &peer.s6.sin6_port,
-			       sizeof(in_port_t));
-			memcpy(buffer + sizeof(in_port_t),
-			       &peer.s6.sin6_addr,
-			       sizeof(struct in6_addr));
-			break;
-		default:
-			OPENSSL_assert(0);
-			break;
-	}
-
-	/* calculate HMAC of buffer using the secret */
-	HMAC(EVP_sha1(), (const void*) cookie_secret, COOKIE_SECRET_LENGTH,
-	     (const unsigned char*) buffer, length, result, &resultlength);
-	OPENSSL_free(buffer);
-
-	if (cookie_len == resultlength && memcmp(result, cookie, resultlength) == 0)
-		return 1;
-
-	return 0;
-}
-
-/*
  * Initializes the TLS context.
  */
 
@@ -347,8 +185,6 @@ int tls_init(void **ctx_ptr, void *priv_key, void *pub_key)
 	SSL_library_init();
 	SSL_load_error_strings();
 	SSL_CTX *ctx = SSL_CTX_new(TLSv1_method());
-	SSL_CTX_set_cipher_list(ctx, "AES256-SHA");
-	SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_OFF);
 
 	/* load the files */
 	if (!SSL_CTX_use_certificate(ctx, pub_key)) {
@@ -371,9 +207,6 @@ int tls_init(void **ctx_ptr, void *priv_key, void *pub_key)
 		tls_verify_callback
 	);
 
-	SSL_CTX_set_read_ahead(ctx, 1);
-	SSL_CTX_set_cookie_generate_cb(ctx, tls_create_cookie);
-	SSL_CTX_set_cookie_verify_cb(ctx, tls_verify_cookie);
 	*ctx_ptr = ctx;
 
 	return 1;

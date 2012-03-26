@@ -1,12 +1,12 @@
 #include <stdio.h>
 #include <string.h>
+#include <netinet/in.h>
 
 #include <openssl/ssl.h>
 #include <openssl/bio.h>
 #include <openssl/err.h>
 #include <openssl/rand.h>
 #include <event2/event.h>
-#include <netinet/in.h>
 
 #include "crypto.h"
 #include "util.h"
@@ -176,7 +176,7 @@ static int tls_verify_callback (int ok, X509_STORE_CTX *ctx) {
 }
 
 /*
- * Creates the cookie necessary for the DTLS handshake.
+ * Creates the cookie necessary for the TLS handshake.
  */
 
 static int tls_create_cookie
@@ -259,7 +259,7 @@ static int tls_create_cookie
 }
 
 /*
- * Verifies the cookie necessary for the DTLS handshake.
+ * Verifies the cookie necessary for the TLS handshake.
  */
 
 static int tls_verify_cookie
@@ -338,7 +338,7 @@ static int tls_verify_cookie
 }
 
 /*
- * Initializes the DTLS context.
+ * Initializes the TLS context.
  */
 
 int tls_init(void **ctx_ptr, void *priv_key, void *pub_key)
@@ -346,7 +346,7 @@ int tls_init(void **ctx_ptr, void *priv_key, void *pub_key)
 	/* create the context */
 	SSL_library_init();
 	SSL_load_error_strings();
-	SSL_CTX *ctx = SSL_CTX_new(SSLv3_method());
+	SSL_CTX *ctx = SSL_CTX_new(TLSv1_method());
 	SSL_CTX_set_cipher_list(ctx, "AES256-SHA");
 	SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_OFF);
 

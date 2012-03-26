@@ -112,7 +112,7 @@ static evutil_socket_t create_socket(char *addr, int *port)
 }
 
 /*
- * Gets the crypto keys and initializes the UDP server.
+ * Gets the crypto keys and initializes the server.
  */
 
 static int start_node(struct event_base *base, int node_num)
@@ -142,7 +142,7 @@ static int start_node(struct event_base *base, int node_num)
 	/* read the config file if necessary */
 	char addr[20];
 	if (node_num == 1 && file_exists(CONFIG_FILE)) {
-		if (!read_config(CONFIG_FILE, "udpsrv", addr)) {
+		if (!read_config(CONFIG_FILE, "tcpsrv", addr)) {
 			printf("Failed to read config\n");
 			return 0;
 		}
@@ -157,7 +157,7 @@ static int start_node(struct event_base *base, int node_num)
 	if ((sock = create_socket(addr, &port)) < 0) {
 		return 0;
 	}
-	printf("Using UDP port %hu\n", port);
+	printf("Using port %hu\n", port);
 
 	/* create the context */
 	void *ctx = NULL;
@@ -173,7 +173,7 @@ static int start_node(struct event_base *base, int node_num)
 	if (node_num == 1 && !file_exists(CONFIG_FILE)) {
 		FILE *file = fopen(CONFIG_FILE, "w");
 		if (fprintf(file, "# Port to accept peers on (forward it!)\n") < 0 ||
-			fprintf(file, "udpsrv\t\t\t%s:%hu\n\n", addr, port) < 0 ||
+			fprintf(file, "tcpsrv\t\t\t%s:%hu\n\n", addr, port) < 0 ||
 			fprintf(file, "# Port used locally by SOCKS-enabled apps\n") < 0 ||
 			fprintf(file, "socsrv\t\t\t%s:9050\n\n", addr) < 0 ||
 			fprintf(file, "# If YES, you'll find peers automatically\n") < 0 ||

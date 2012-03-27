@@ -119,17 +119,17 @@ static evutil_socket_t create_socket(char *addr, int *port)
  * Gets the crypto keys and initializes the server.
  */
 
-static int start_node(struct event_base *base, int node_num, int last_port)
+static int start_node(struct event_base *base, int last_port)
 {
 	/* create or load the keys */
 	void *priv = NULL, *pub = NULL;
-	if (node_num > 1 || !file_exists(PRIV_FILE)) {
+	if (last_port > 0 || !file_exists(PRIV_FILE)) {
 		if (!create_private_key(&priv) ||
 			!create_public_key(&pub, priv))
 		{
 			return 0;
 		}
-		if (node_num == 1) {
+		if (last_port == 0) {
 			if (!write_private_key(priv, PRIV_FILE) ||
 				!write_public_key(pub, PUB_FILE))
 			{
@@ -145,7 +145,7 @@ static int start_node(struct event_base *base, int node_num, int last_port)
 
 	/* read the config file if necessary */
 	char addr[20];
-	if (node_num == 1 && file_exists(CONFIG_FILE)) {
+	if (last_port == 0 && file_exists(CONFIG_FILE)) {
 		if (!read_config(CONFIG_FILE, "tcpsrv", addr)) {
 			printf("Failed to read config\n");
 			return 0;
@@ -174,7 +174,7 @@ static int start_node(struct event_base *base, int node_num, int last_port)
 		LEV_OPT_CLOSE_ON_FREE | LEV_OPT_REUSEABLE, 1024, sock);
 
 	/* write the config file if necessary */
-	if (node_num == 1 && !file_exists(CONFIG_FILE)) {
+	if (last_port == 0 && !file_exists(CONFIG_FILE)) {
 		FILE *file = fopen(CONFIG_FILE, "w");
 		if (fprintf(file, "# Port to accept peers on (forward it!)\n") < 0 ||
 			fprintf(file, "tcpsrv\t\t\t%s:%hu\n\n", addr, port) < 0 ||
@@ -228,7 +228,7 @@ int main(int argc, char** argv)
 	struct event_base *base = event_base_new();
 	int port = 0;
 	for (; count > 0; count--) {
-		if (!(port = start_node(base, count, port))) {
+		if (!(port = start_node(base, port))) {
 			return 1;
 		}
 	}

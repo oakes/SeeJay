@@ -8,6 +8,7 @@ int read_public_key(void **pub_key, char *name);
 int write_private_key(void *priv_key, char *name);
 int write_public_key(void *pub_key, char *name);
 
-int tls_init(void **ctx_ptr, void *priv_key, void *pub_key);
+int tls_global_init(void **ctx_ptr, void *priv_key, void *pub_key);
+int tls_local_init(void **ssl_ptr, void *ctx);
 
 #endif

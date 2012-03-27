@@ -175,7 +175,7 @@ static int tls_verify_callback (int ok, X509_STORE_CTX *ctx) {
  * Initializes the TLS context.
  */
 
-int tls_init(void **ctx_ptr, void *priv_key, void *pub_key)
+int tls_global_init(void **ctx_ptr, void *priv_key, void *pub_key)
 {
 	/* create the context */
 	SSL_library_init();
@@ -205,5 +205,16 @@ int tls_init(void **ctx_ptr, void *priv_key, void *pub_key)
 
 	*ctx_ptr = ctx;
 
+	return 1;
+}
+
+/*
+ * Initializes a TLS object for a specific connection.
+ */
+
+int tls_local_init(void **ssl_ptr, void *ctx)
+{
+	SSL *ssl = SSL_new(ctx);
+	*ssl_ptr = ssl;
 	return 1;
 }

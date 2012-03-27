@@ -62,10 +62,14 @@ static void on_accept
  */
 
 static struct bufferevent * create_event
-	(struct event_base *base, void *ctx, int is_server)
+	(struct event_base *base, void *ctx, evutil_socket_t sock)
 {
-	struct bufferevent *bev = bufferevent_openssl_socket_new(base, -1, ctx,
-		is_server ? BUFFEREVENT_SSL_CONNECTING : BUFFEREVENT_SSL_ACCEPTING,
+	void *ssl = NULL;
+	if (!tls_local_init(&ssl, ctx)) {
+		return NULL;
+	}
+	struct bufferevent *bev = bufferevent_openssl_socket_new(base, sock, ssl,
+		sock >= 0 ? BUFFEREVENT_SSL_ACCEPTING : BUFFEREVENT_SSL_CONNECTING,
 		BEV_OPT_CLOSE_ON_FREE);
 	bufferevent_enable(bev, EV_READ | EV_WRITE);
 	bufferevent_setcb(bev, on_read, on_write, on_event, ctx);
@@ -115,7 +119,7 @@ static evutil_socket_t create_socket(char *addr, int *port)
  * Gets the crypto keys and initializes the server.
  */
 
-static int start_node(struct event_base *base, int node_num)
+static int start_node(struct event_base *base, int node_num, int last_port)
 {
 	/* create or load the keys */
 	void *priv = NULL, *pub = NULL;
@@ -161,7 +165,7 @@ static int start_node(struct event_base *base, int node_num)
 
 	/* create the context */
 	void *ctx = NULL;
-	if (!tls_init(&ctx, priv, pub)) {
+	if (!tls_global_init(&ctx, priv, pub)) {
 		return 0;
 	}
 
@@ -186,7 +190,21 @@ static int start_node(struct event_base *base, int node_num)
 		fclose(file);
 	}
 
-	return 1;
+	/* test connection if necessary */
+	if (last_port > 0) {
+		struct bufferevent *bev = create_event(base, ctx, -1);
+
+		sprintf(addr, "127.0.0.1:%d", last_port);
+		struct sockaddr_storage ss;
+		int len = sizeof(ss);
+
+		evutil_parse_sockaddr_port(addr, (struct sockaddr *)&ss, &len);
+		if (bufferevent_socket_connect(bev, (struct sockaddr *)&ss, len)) {
+			return 0;
+		}
+	}
+
+	return port;
 }
 
 /*
@@ -208,8 +226,9 @@ int main(int argc, char** argv)
 
 	/* start the node(s) and enter the event loop */
 	struct event_base *base = event_base_new();
+	int port = 0;
 	for (; count > 0; count--) {
-		if (!start_node(base, count)) {
+		if (!(port = start_node(base, count, port))) {
 			return 1;
 		}
 	}

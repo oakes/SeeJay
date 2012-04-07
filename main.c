@@ -22,7 +22,10 @@
 
 static void on_read(struct bufferevent *bev, void *ctx)
 {
-	printf("on_read()\n");
+	char buffer[1024];
+	bufferevent_read(bev, buffer, sizeof(buffer));
+
+	printf("on_read(): %s\n", buffer);
 }
 
 /*
@@ -40,21 +43,26 @@ static void on_write(struct bufferevent *bev, void *ctx)
 
 static void on_event(struct bufferevent *bev, short what, void *ctx)
 {
-	printf("on_event()\n");
-}
-
-/*
- * Callback function when connection is accepted.
- */
-
-static void on_accept
-	(struct evconnlistener *serv,
-	evutil_socket_t sock,
-	struct sockaddr *addr,
-	int addr_len,
-	void *ctx)
-{
-	printf("on_accept()\n");
+	switch (what) {
+		case BEV_EVENT_READING:
+			printf("error encountered while reading\n");
+			break;
+		case BEV_EVENT_WRITING:
+			printf("error encountered while writing\n");
+			break;
+		case BEV_EVENT_EOF:
+			printf("eof file reached\n");
+			break;
+		case BEV_EVENT_ERROR:
+			printf("unrecoverable error encountered\n");
+			break;
+		case BEV_EVENT_TIMEOUT:
+			printf("user-specified timeout reached\n");
+			break;
+		case BEV_EVENT_CONNECTED:
+			printf("connect operation finished\n");
+			break;
+	}
 }
 
 /*
@@ -74,6 +82,23 @@ static struct bufferevent * create_event
 	bufferevent_enable(bev, EV_READ | EV_WRITE);
 	bufferevent_setcb(bev, on_read, on_write, on_event, ctx);
 	return bev;
+}
+
+/*
+ * Callback function when connection is accepted.
+ */
+
+static void on_accept
+	(struct evconnlistener *serv,
+	evutil_socket_t sock,
+	struct sockaddr *addr,
+	int addr_len,
+	void *ctx)
+{
+	printf("on_accept()\n");
+
+	struct event_base *base = evconnlistener_get_base(serv);
+	struct bufferevent *bev = create_event(base, ctx, sock);
 }
 
 /*
@@ -202,6 +227,8 @@ static int start_node(struct event_base *base, int last_port)
 		if (bufferevent_socket_connect(bev, (struct sockaddr *)&ss, len)) {
 			return 0;
 		}
+
+		bufferevent_write(bev, "hello", sizeof("hello"));
 	}
 
 	return port;

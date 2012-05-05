@@ -16,6 +16,10 @@
 #define PUB_FILE "public.pem"
 #define CONFIG_FILE  "seejay.conf"
 
+struct node_info {
+	short port;
+};
+
 /*
  * Callback function when receiving data.
  */
@@ -105,7 +109,7 @@ static void on_accept
  * Creates and binds a socket to accept packets.
  */
 
-static evutil_socket_t create_socket(char *addr, int *port)
+static evutil_socket_t create_socket(char *addr, short *port)
 {
 	/* create a socket */
 	evutil_socket_t sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -144,17 +148,18 @@ static evutil_socket_t create_socket(char *addr, int *port)
  * Gets the crypto keys and initializes the server.
  */
 
-static int start_node(struct event_base *base, int last_port)
+static int start_node
+	(struct event_base *base, struct node_info *all_info, int num)
 {
 	/* create or load the keys */
 	void *priv = NULL, *pub = NULL;
-	if (last_port > 0 || !file_exists(PRIV_FILE)) {
+	if (num != 0 || !file_exists(PRIV_FILE)) {
 		if (!create_private_key(&priv) ||
 			!create_public_key(&pub, priv))
 		{
 			return 0;
 		}
-		if (last_port == 0) {
+		if (num == 0) {
 			if (!write_private_key(priv, PRIV_FILE) ||
 				!write_public_key(pub, PUB_FILE))
 			{
@@ -170,7 +175,7 @@ static int start_node(struct event_base *base, int last_port)
 
 	/* read the config file if necessary */
 	char addr[20];
-	if (last_port == 0 && file_exists(CONFIG_FILE)) {
+	if (num == 0 && file_exists(CONFIG_FILE)) {
 		if (!read_config(CONFIG_FILE, "tcpsrv", addr)) {
 			printf("Failed to read config\n");
 			return 0;
@@ -181,12 +186,12 @@ static int start_node(struct event_base *base, int last_port)
 	}
 
 	/* create the server socket */
-	int port;
+	struct node_info info;
 	evutil_socket_t sock;
-	if ((sock = create_socket(addr, &port)) < 0) {
+	if ((sock = create_socket(addr, &info.port)) < 0) {
 		return 0;
 	}
-	printf("Using port %hu\n", port);
+	printf("Using port %hu\n", info.port);
 
 	/* create the context */
 	void *ctx = NULL;
@@ -199,10 +204,10 @@ static int start_node(struct event_base *base, int last_port)
 		LEV_OPT_CLOSE_ON_FREE | LEV_OPT_REUSEABLE, 1024, sock);
 
 	/* write the config file if necessary */
-	if (last_port == 0 && !file_exists(CONFIG_FILE)) {
+	if (num == 0 && !file_exists(CONFIG_FILE)) {
 		FILE *file = fopen(CONFIG_FILE, "w");
 		if (fprintf(file, "# Port to accept peers on (forward it!)\n") < 0 ||
-			fprintf(file, "tcpsrv\t\t\t%s:%hu\n\n", addr, port) < 0 ||
+			fprintf(file, "tcpsrv\t\t\t%s:%hu\n\n", addr, info.port) < 0 ||
 			fprintf(file, "# Port used locally by SOCKS-enabled apps\n") < 0 ||
 			fprintf(file, "socsrv\t\t\t%s:9050\n\n", addr) < 0 ||
 			fprintf(file, "# If YES, you'll find peers automatically\n") < 0 ||
@@ -216,10 +221,10 @@ static int start_node(struct event_base *base, int last_port)
 	}
 
 	/* test connection if necessary */
-	if (last_port > 0) {
+	if (num != 0) {
 		struct bufferevent *bev = create_event(base, ctx, -1);
 
-		sprintf(addr, "127.0.0.1:%d", last_port);
+		sprintf(addr, "127.0.0.1:%hu", all_info[num-1].port);
 		struct sockaddr_storage ss;
 		int len = sizeof(ss);
 
@@ -231,7 +236,10 @@ static int start_node(struct event_base *base, int last_port)
 		bufferevent_write(bev, "hello", sizeof("hello"));
 	}
 
-	return port;
+	/* save the node's info for later use */
+	memcpy(&all_info[num], &info, sizeof(struct node_info));
+
+	return 1;
 }
 
 /*
@@ -251,11 +259,18 @@ int main(int argc, char** argv)
 		}
 	}
 
+	/* allocate space to store the info for the node(s) */
+	struct node_info *info;
+	if ((info = calloc(count, sizeof(struct node_info))) == NULL) {
+		printf("failed to allocate memory\n");
+		return 1;
+	}
+
 	/* start the node(s) and enter the event loop */
 	struct event_base *base = event_base_new();
-	int port = 0;
-	for (; count > 0; count--) {
-		if (!(port = start_node(base, port))) {
+	int i;
+	for (i = 0; i < count; i++) {
+		if (!start_node(base, info, i)) {
 			return 1;
 		}
 	}

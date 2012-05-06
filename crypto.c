@@ -13,7 +13,7 @@
  * Generates an RSA-2048 private key.
  */
 
-int create_private_key(void **priv_key) {
+int create_private_key(void **priv_key_ptr) {
 	RSA *rsa;
 	BIGNUM num;
 	bzero(&num, sizeof(num));
@@ -26,13 +26,13 @@ int create_private_key(void **priv_key) {
 		return 0;
 	}
 
-	EVP_PKEY *pkey = EVP_PKEY_new();
-	if (EVP_PKEY_assign_RSA(pkey, rsa) == 0) {
+	EVP_PKEY *priv_key = EVP_PKEY_new();
+	if (EVP_PKEY_assign_RSA(priv_key, rsa) == 0) {
 		printf("Failed to parse the private key\n");
 		return 0;
 	}
 
-	*priv_key = pkey;
+	*priv_key_ptr = priv_key;
 
 	return 1;
 }
@@ -41,7 +41,7 @@ int create_private_key(void **priv_key) {
  * Creates a public certificate from the supplied private key.
  */
 
-int create_public_key(void **pub_key, void *priv_key)
+int create_public_key(void **pub_key_ptr, void *priv_key)
 {
 	/* create X509 request */
 	X509_REQ *req = NULL;
@@ -75,7 +75,7 @@ int create_public_key(void **pub_key, void *priv_key)
 	EVP_PKEY_free(tempkey);
 	X509_REQ_free(req);
 
-	*pub_key = x509;
+	*pub_key_ptr = x509;
 
 	return 1;
 }
@@ -121,13 +121,13 @@ int write_public_key(void *pub_key, char *name)
  * Reads the private key from the disk.
  */
 
-int read_private_key(void **priv_key, char *name)
+int read_private_key(void **priv_key_ptr, char *name)
 {
-	EVP_PKEY *pkey;
+	EVP_PKEY *priv_key;
 	FILE *file;
 
 	if ((file = fopen(name, "r")) == NULL ||
-		(pkey = PEM_read_PrivateKey(file, NULL, NULL, NULL)) == NULL)
+		(priv_key = PEM_read_PrivateKey(file, NULL, NULL, NULL)) == NULL)
 	{
 		printf("Failed to read the private key\n");
 		fclose(file);
@@ -135,7 +135,7 @@ int read_private_key(void **priv_key, char *name)
 	}
 	fclose(file);
 
-	*priv_key = pkey;
+	*priv_key_ptr = priv_key;
 
 	return 1;
 }
@@ -144,7 +144,7 @@ int read_private_key(void **priv_key, char *name)
  * Reads the public key from the disk.
  */
 
-int read_public_key(void **pub_key, char *name)
+int read_public_key(void **pub_key_ptr, char *name)
 {
 	X509 *x509;
 	FILE *file;
@@ -158,16 +158,50 @@ int read_public_key(void **pub_key, char *name)
 	}
 	fclose(file);
 
-	*pub_key = x509;
+	*pub_key_ptr = x509;
 
 	return 1;
+}
+
+/*
+ * Generates a hash of the public key.
+ */
+
+int create_fingerprint(unsigned char **hash_ptr, void *pub_key)
+{
+	OpenSSL_add_all_digests();
+	const EVP_MD *digest = EVP_get_digestbyname("sha1");
+	int size = EVP_MD_size(digest);
+	if ((*hash_ptr = malloc(size)) == NULL) {
+		return 0;
+	}
+	unsigned int n;
+	X509_digest(pub_key, digest, *hash_ptr, &n);
+	return size;
 }
 
 /*
  * Determines if we trust the certificate we've received.
  */
 
-static int tls_verify_callback (int ok, X509_STORE_CTX *ctx) {
+static int tls_verify_callback(int ok, X509_STORE_CTX *ctx) {
+	X509 *x509 = X509_STORE_CTX_get_current_cert(ctx);
+	SSL *ssl = X509_STORE_CTX_get_ex_data
+		(ctx, SSL_get_ex_data_X509_STORE_CTX_idx());
+
+	/* if we're the client, make sure their public key matches the hash */
+	unsigned char *hash = SSL_get_ex_data(ssl, 0);
+	if (hash != NULL) {
+		unsigned char *expected_hash;
+		int size = create_fingerprint(&expected_hash, x509);
+		if (memcmp(hash, expected_hash, size)) {
+			free(expected_hash);
+			printf("public key doesn't match fingerprint\n");
+			return 0;
+		}
+		free(expected_hash);
+	}
+
 	return 1;
 }
 
@@ -212,9 +246,10 @@ int tls_global_init(void **ctx_ptr, void *priv_key, void *pub_key)
  * Initializes a TLS object for a specific connection.
  */
 
-int tls_local_init(void **ssl_ptr, void *ctx)
+int tls_local_init(void **ssl_ptr, void *ctx, unsigned char *hash)
 {
 	SSL *ssl = SSL_new(ctx);
+	SSL_set_ex_data(ssl, 0, hash);
 	*ssl_ptr = ssl;
 	return 1;
 }

@@ -18,6 +18,12 @@
 
 struct node_info {
 	short port;
+
+	void *ctx;
+	void *priv;
+	void *pub;
+
+	unsigned char *hash;
 };
 
 /*
@@ -64,7 +70,7 @@ static void on_event(struct bufferevent *bev, short what, void *ctx)
 			printf("user-specified timeout reached\n");
 			break;
 		case BEV_EVENT_CONNECTED:
-			printf("connect operation finished\n");
+			//printf("connect operation finished\n");
 			break;
 	}
 }
@@ -74,10 +80,10 @@ static void on_event(struct bufferevent *bev, short what, void *ctx)
  */
 
 static struct bufferevent * create_event
-	(struct event_base *base, void *ctx, evutil_socket_t sock)
+	(struct event_base *base, void *ctx, void *hash, evutil_socket_t sock)
 {
 	void *ssl = NULL;
-	if (!tls_local_init(&ssl, ctx)) {
+	if (!tls_local_init(&ssl, ctx, hash)) {
 		return NULL;
 	}
 	struct bufferevent *bev = bufferevent_openssl_socket_new(base, sock, ssl,
@@ -102,7 +108,7 @@ static void on_accept
 	printf("on_accept()\n");
 
 	struct event_base *base = evconnlistener_get_base(serv);
-	struct bufferevent *bev = create_event(base, ctx, sock);
+	struct bufferevent *bev = create_event(base, ctx, NULL, sock);
 }
 
 /*
@@ -151,27 +157,32 @@ static evutil_socket_t create_socket(char *addr, short *port)
 static int start_node
 	(struct event_base *base, struct node_info *all_info, int num)
 {
+	struct node_info info;
+
 	/* create or load the keys */
-	void *priv = NULL, *pub = NULL;
+	info.priv = info.pub = NULL;
 	if (num != 0 || !file_exists(PRIV_FILE)) {
-		if (!create_private_key(&priv) ||
-			!create_public_key(&pub, priv))
+		if (!create_private_key(&info.priv) ||
+			!create_public_key(&info.pub, info.priv))
 		{
 			return 0;
 		}
 		if (num == 0) {
-			if (!write_private_key(priv, PRIV_FILE) ||
-				!write_public_key(pub, PUB_FILE))
+			if (!write_private_key(info.priv, PRIV_FILE) ||
+				!write_public_key(info.pub, PUB_FILE))
 			{
 				return 0;
 			}
 		}
 	}
-	else if (!read_private_key(&priv, PRIV_FILE) ||
-		!read_public_key(&pub, PUB_FILE))
+	else if (!read_private_key(&info.priv, PRIV_FILE) ||
+		!read_public_key(&info.pub, PUB_FILE))
 	{
 		return 0;
 	}
+
+	/* create fingerprint from the public key */
+	create_fingerprint(&info.hash, info.pub);
 
 	/* read the config file if necessary */
 	char addr[20];
@@ -186,7 +197,6 @@ static int start_node
 	}
 
 	/* create the server socket */
-	struct node_info info;
 	evutil_socket_t sock;
 	if ((sock = create_socket(addr, &info.port)) < 0) {
 		return 0;
@@ -194,13 +204,13 @@ static int start_node
 	printf("Using port %hu\n", info.port);
 
 	/* create the context */
-	void *ctx = NULL;
-	if (!tls_global_init(&ctx, priv, pub)) {
+	info.ctx = NULL;
+	if (!tls_global_init(&info.ctx, info.priv, info.pub)) {
 		return 0;
 	}
 
 	/* add it to the event loop */
-	struct evconnlistener *conn = evconnlistener_new(base, on_accept, ctx,
+	struct evconnlistener *conn = evconnlistener_new(base, on_accept, info.ctx,
 		LEV_OPT_CLOSE_ON_FREE | LEV_OPT_REUSEABLE, 1024, sock);
 
 	/* write the config file if necessary */
@@ -218,22 +228,6 @@ static int start_node
 			return 0;
 		}
 		fclose(file);
-	}
-
-	/* test connection if necessary */
-	if (num != 0) {
-		struct bufferevent *bev = create_event(base, ctx, -1);
-
-		sprintf(addr, "127.0.0.1:%hu", all_info[num-1].port);
-		struct sockaddr_storage ss;
-		int len = sizeof(ss);
-
-		evutil_parse_sockaddr_port(addr, (struct sockaddr *)&ss, &len);
-		if (bufferevent_socket_connect(bev, (struct sockaddr *)&ss, len)) {
-			return 0;
-		}
-
-		bufferevent_write(bev, "hello", sizeof("hello"));
 	}
 
 	/* save the node's info for later use */
@@ -266,7 +260,7 @@ int main(int argc, char** argv)
 		return 1;
 	}
 
-	/* start the node(s) and enter the event loop */
+	/* start the node(s) */
 	struct event_base *base = event_base_new();
 	int i;
 	for (i = 0; i < count; i++) {
@@ -274,5 +268,26 @@ int main(int argc, char** argv)
 			return 1;
 		}
 	}
+
+	/* run test if necessary */
+	if (count > 1) {
+		struct bufferevent *bev =
+			create_event(base, info[1].ctx, info[0].hash, -1);
+
+		char addr[20];
+		sprintf(addr, "127.0.0.1:%hu", info[0].port);
+		struct sockaddr_storage ss;
+		int len = sizeof(ss);
+
+		evutil_parse_sockaddr_port(addr, (struct sockaddr *)&ss, &len);
+		if (bufferevent_socket_connect(bev, (struct sockaddr *)&ss, len)) {
+			printf("failed to connect\n");
+			return 1;
+		}
+
+		bufferevent_write(bev, "hello", sizeof("hello"));
+	}
+
+	/* start event loop */
 	event_base_dispatch(base);
 }

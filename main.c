@@ -30,28 +30,28 @@ struct node_info {
  * Callback function when receiving data.
  */
 
-static void on_read(struct bufferevent *bev, void *ctx)
+static void on_read(struct bufferevent *bev, void *info)
 {
 	char buffer[1024];
 	bufferevent_read(bev, buffer, sizeof(buffer));
 
-	printf("on_read(): %s\n", buffer);
+	printf("%hu: %s\n", ((struct node_info *)info)->port, buffer);
 }
 
 /*
  * Callback function when writing data.
  */
 
-static void on_write(struct bufferevent *bev, void *ctx)
+static void on_write(struct bufferevent *bev, void *info)
 {
-	printf("on_write()\n");
+	//printf("on_write()\n");
 }
 
 /*
  * Callback function when misc events happen.
  */
 
-static void on_event(struct bufferevent *bev, short what, void *ctx)
+static void on_event(struct bufferevent *bev, short what, void *info)
 {
 	switch (what) {
 		case BEV_EVENT_READING:
@@ -80,17 +80,20 @@ static void on_event(struct bufferevent *bev, short what, void *ctx)
  */
 
 static struct bufferevent * create_event
-	(struct event_base *base, void *ctx, void *hash, evutil_socket_t sock)
+	(struct event_base *base,
+	struct node_info *info,
+	unsigned char *hash,
+	evutil_socket_t sock)
 {
 	void *ssl = NULL;
-	if (!tls_local_init(&ssl, ctx, hash)) {
+	if (!tls_local_init(&ssl, info->ctx, hash)) {
 		return NULL;
 	}
 	struct bufferevent *bev = bufferevent_openssl_socket_new(base, sock, ssl,
 		sock >= 0 ? BUFFEREVENT_SSL_ACCEPTING : BUFFEREVENT_SSL_CONNECTING,
 		BEV_OPT_CLOSE_ON_FREE);
 	bufferevent_enable(bev, EV_READ | EV_WRITE);
-	bufferevent_setcb(bev, on_read, on_write, on_event, ctx);
+	bufferevent_setcb(bev, on_read, on_write, on_event, info);
 	return bev;
 }
 
@@ -103,12 +106,12 @@ static void on_accept
 	evutil_socket_t sock,
 	struct sockaddr *addr,
 	int addr_len,
-	void *ctx)
+	void *info)
 {
-	printf("on_accept()\n");
+	//printf("on_accept()\n");
 
 	struct event_base *base = evconnlistener_get_base(serv);
-	struct bufferevent *bev = create_event(base, ctx, NULL, sock);
+	struct bufferevent *bev = create_event(base, info, NULL, sock);
 }
 
 /*
@@ -184,6 +187,12 @@ static int start_node
 	/* create fingerprint from the public key */
 	create_fingerprint(&info.hash, info.pub);
 
+	/* create the context */
+	info.ctx = NULL;
+	if (!tls_global_init(&info.ctx, info.priv, info.pub)) {
+		return 0;
+	}
+
 	/* read the config file if necessary */
 	char addr[20];
 	if (num == 0 && file_exists(CONFIG_FILE)) {
@@ -202,16 +211,6 @@ static int start_node
 		return 0;
 	}
 	printf("Using port %hu\n", info.port);
-
-	/* create the context */
-	info.ctx = NULL;
-	if (!tls_global_init(&info.ctx, info.priv, info.pub)) {
-		return 0;
-	}
-
-	/* add it to the event loop */
-	struct evconnlistener *conn = evconnlistener_new(base, on_accept, info.ctx,
-		LEV_OPT_CLOSE_ON_FREE | LEV_OPT_REUSEABLE, 1024, sock);
 
 	/* write the config file if necessary */
 	if (num == 0 && !file_exists(CONFIG_FILE)) {
@@ -233,6 +232,10 @@ static int start_node
 	/* save the node's info for later use */
 	memcpy(&all_info[num], &info, sizeof(struct node_info));
 
+	/* add the socket to the event loop */
+	struct evconnlistener *conn = evconnlistener_new(base, on_accept,
+		&all_info[num], LEV_OPT_CLOSE_ON_FREE | LEV_OPT_REUSEABLE, 1024, sock);
+
 	return 1;
 }
 
@@ -249,7 +252,7 @@ int main(int argc, char** argv)
 	while (argc > 0) {
 		argc--;
 		if (!strcmp(argv[argc], "--test")) {
-			count = 2;
+			count = 10;
 		}
 	}
 
@@ -270,22 +273,31 @@ int main(int argc, char** argv)
 	}
 
 	/* run test if necessary */
-	if (count > 1) {
-		struct bufferevent *bev =
-			create_event(base, info[1].ctx, info[0].hash, -1);
+	for (i = 1; i < count; i++) {
+		int j;
+		for (j = 1; j <= 3; j++) {
+			if (i - j < 0) {
+				break;
+			}
 
-		char addr[20];
-		sprintf(addr, "127.0.0.1:%hu", info[0].port);
-		struct sockaddr_storage ss;
-		int len = sizeof(ss);
+			struct bufferevent *bev =
+				create_event(base, &info[i], info[i-j].hash, -1);
 
-		evutil_parse_sockaddr_port(addr, (struct sockaddr *)&ss, &len);
-		if (bufferevent_socket_connect(bev, (struct sockaddr *)&ss, len)) {
-			printf("failed to connect\n");
-			return 1;
+			char addr[20];
+			sprintf(addr, "127.0.0.1:%hu", info[i-j].port);
+			struct sockaddr_storage ss;
+			int len = sizeof(ss);
+
+			evutil_parse_sockaddr_port(addr, (struct sockaddr *)&ss, &len);
+			if (bufferevent_socket_connect(bev, (struct sockaddr *)&ss, len)) {
+				printf("failed to connect\n");
+				return 1;
+			}
+
+			char message[20];
+			sprintf(message, "hello from %hu", info[i].port);
+			bufferevent_write(bev, message, strlen(message)+1);
 		}
-
-		bufferevent_write(bev, "hello", sizeof("hello"));
 	}
 
 	/* start event loop */

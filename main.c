@@ -23,7 +23,7 @@ struct node_info {
 	void *priv;
 	void *pub;
 
-	unsigned char *hash;
+	unsigned char hash[HASH_SIZE];
 };
 
 /*
@@ -185,7 +185,7 @@ static int start_node
 	}
 
 	/* create fingerprint from the public key */
-	create_fingerprint(&info.hash, info.pub);
+	create_fingerprint(info.hash, info.pub);
 
 	/* create the context */
 	info.ctx = NULL;

@@ -167,17 +167,13 @@ int read_public_key(void **pub_key_ptr, char *name)
  * Generates a hash of the public key.
  */
 
-int create_fingerprint(unsigned char **hash_ptr, void *pub_key)
+int create_fingerprint(unsigned char *hash_ptr, void *pub_key)
 {
 	OpenSSL_add_all_digests();
 	const EVP_MD *digest = EVP_get_digestbyname("sha1");
-	int size = EVP_MD_size(digest);
-	if ((*hash_ptr = malloc(size)) == NULL) {
-		return 0;
-	}
 	unsigned int n;
-	X509_digest(pub_key, digest, *hash_ptr, &n);
-	return size;
+	X509_digest(pub_key, digest, hash_ptr, &n);
+	return 1;
 }
 
 /*
@@ -192,14 +188,12 @@ static int tls_verify_callback(int ok, X509_STORE_CTX *ctx) {
 	/* if we're the client, make sure their public key matches the hash */
 	unsigned char *hash = SSL_get_ex_data(ssl, 0);
 	if (hash != NULL) {
-		unsigned char *expected_hash;
-		int size = create_fingerprint(&expected_hash, x509);
-		if (memcmp(hash, expected_hash, size)) {
-			free(expected_hash);
+		unsigned char expected_hash[HASH_SIZE];
+		create_fingerprint(expected_hash, x509);
+		if (memcmp(hash, expected_hash, HASH_SIZE)) {
 			printf("public key doesn't match fingerprint\n");
 			return 0;
 		}
-		free(expected_hash);
 	}
 
 	return 1;

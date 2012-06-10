@@ -1,0 +1,4 @@
+SeeJay is a simple C program that demonstrates key generation and
+establishing SSL connections using OpenSSL and Libevent.
+
+./seejay --test
